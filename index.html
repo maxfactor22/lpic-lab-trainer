@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactive LPIC-1 command line labs for Linux learners.">
+  <meta name="theme-color" content="#101815">
+  <title>LPIC-1 Lab Trainer | System Information</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#lesson">Skip to lesson</a>
+
+  <header class="site-header">
+    <div class="brand" aria-label="LPIC-1 Lab Trainer">
+      <span class="brand-mark" aria-hidden="true">$_</span>
+      <span>
+        <strong>LPIC-1 Lab Trainer</strong>
+        <small>Command Line Basics</small>
+      </span>
+    </div>
+    <div class="header-actions">
+      <div class="progress-summary" aria-label="Lesson progress">
+        <span id="progress-label">0 of 7 tasks</span>
+        <div class="progress-track" aria-hidden="true">
+          <span id="progress-bar"></span>
+        </div>
+      </div>
+      <button class="button button-quiet" id="reset-progress" type="button">Reset lesson</button>
+    </div>
+  </header>
+
+  <main id="lesson" class="app-shell">
+    <aside class="lesson-nav" aria-label="Course lessons">
+      <p class="eyebrow">Objective 103.1</p>
+      <h2>Lessons</h2>
+      <ol>
+        <li>
+          <a class="lesson-link current" href="#mission" aria-current="page">
+            <span class="lesson-number">01</span>
+            <span><strong>System information</strong><small>uname fundamentals</small></span>
+          </a>
+        </li>
+        <li class="locked">
+          <span class="lesson-link">
+            <span class="lesson-number">02</span>
+            <span><strong>Bash version</strong><small>Coming next</small></span>
+          </span>
+        </li>
+        <li class="locked">
+          <span class="lesson-link">
+            <span class="lesson-number">03</span>
+            <span><strong>Command structure</strong><small>Coming next</small></span>
+          </span>
+        </li>
+      </ol>
+      <div class="nav-note">
+        <strong>Practice model</strong>
+        <p>Read the ticket, run the commands, explain the result, then solve the challenge without a hint.</p>
+      </div>
+    </aside>
+
+    <div class="lesson-content">
+      <section class="hero" id="mission">
+        <div>
+          <p class="eyebrow">Lesson 1 of 8</p>
+          <h1>Identify basic system information</h1>
+          <p class="hero-copy">Use <code>uname</code> to identify the kernel name, release, build information, and full system summary.</p>
+        </div>
+        <div class="difficulty" aria-label="Difficulty: Easy">
+          <span aria-hidden="true"></span>
+          Easy
+        </div>
+      </section>
+
+      <section class="briefing panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Support ticket</p>
+            <h2>Your mission</h2>
+          </div>
+          <span class="status-pill">Junior engineer</span>
+        </div>
+        <p>A senior engineer needs a quick system summary from a Linux Mint virtual machine. Collect the information with the right <code>uname</code> options and explain what each result means.</p>
+        <div class="callout">
+          <span class="callout-icon" aria-hidden="true">i</span>
+          <div><strong>Safe practice</strong><br>No <code>sudo</code> is needed. The terminal below is a simulation, so you can experiment without changing a real system.</div>
+        </div>
+      </section>
+
+      <section class="workspace-grid" aria-label="Interactive lab workspace">
+        <div class="task-column">
+          <section class="panel tasks-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Guided practice</p>
+                <h2>Run each command</h2>
+              </div>
+              <span id="task-count" class="status-pill">0 / 5 complete</span>
+            </div>
+            <ol class="task-list" id="task-list">
+              <li class="task" data-task="uname">
+                <button class="task-toggle" type="button" aria-expanded="true">
+                  <span class="task-check" aria-hidden="true">1</span>
+                  <span><strong>Kernel name</strong><small>Run <code>uname</code></small></span>
+                  <span class="chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="task-detail">
+                  <p>Start with the command by itself. Compare this result with the next task.</p>
+                  <button class="command-chip" type="button" data-command="uname">Type <code>uname</code> for me</button>
+                </div>
+              </li>
+              <li class="task" data-task="uname-s">
+                <button class="task-toggle" type="button" aria-expanded="false">
+                  <span class="task-check" aria-hidden="true">2</span>
+                  <span><strong>Kernel name, explicit</strong><small>Run <code>uname -s</code></small></span>
+                  <span class="chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="task-detail" hidden>
+                  <p>The <code>-s</code> option asks for the kernel name. Does it match plain <code>uname</code>?</p>
+                  <button class="command-chip" type="button" data-command="uname -s">Type <code>uname -s</code> for me</button>
+                </div>
+              </li>
+              <li class="task" data-task="uname-r">
+                <button class="task-toggle" type="button" aria-expanded="false">
+                  <span class="task-check" aria-hidden="true">3</span>
+                  <span><strong>Kernel release</strong><small>Run <code>uname -r</code></small></span>
+                  <span class="chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="task-detail" hidden>
+                  <p>The release is the kernel version identifier you will often use during troubleshooting.</p>
+                  <button class="command-chip" type="button" data-command="uname -r">Type <code>uname -r</code> for me</button>
+                </div>
+              </li>
+              <li class="task" data-task="uname-v">
+                <button class="task-toggle" type="button" aria-expanded="false">
+                  <span class="task-check" aria-hidden="true">4</span>
+                  <span><strong>Kernel build</strong><small>Run <code>uname -v</code></small></span>
+                  <span class="chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="task-detail" hidden>
+                  <p>This is build information. It is not the same thing as the kernel release.</p>
+                  <button class="command-chip" type="button" data-command="uname -v">Type <code>uname -v</code> for me</button>
+                </div>
+              </li>
+              <li class="task" data-task="uname-a">
+                <button class="task-toggle" type="button" aria-expanded="false">
+                  <span class="task-check" aria-hidden="true">5</span>
+                  <span><strong>Full summary</strong><small>Run <code>uname -a</code></small></span>
+                  <span class="chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="task-detail" hidden>
+                  <p>Look for at least three pieces of information, such as kernel name, host name, release, build, machine architecture, and operating system.</p>
+                  <button class="command-chip" type="button" data-command="uname -a">Type <code>uname -a</code> for me</button>
+                </div>
+              </li>
+            </ol>
+          </section>
+        </div>
+
+        <section class="terminal-panel" aria-label="Simulated Linux terminal">
+          <div class="terminal-titlebar">
+            <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span>max@linux-mint: ~/lpic1031-labs/system-info</span>
+            <button id="clear-terminal" type="button">Clear</button>
+          </div>
+          <div class="terminal" id="terminal-output" role="log" aria-live="polite" aria-label="Terminal output">
+            <p class="terminal-muted">LPIC practice terminal. Type <span class="terminal-command">help</span> to see supported commands.</p>
+          </div>
+          <form class="terminal-input-row" id="terminal-form" autocomplete="off">
+            <label for="terminal-input" class="prompt">max@linux-mint:~$</label>
+            <input id="terminal-input" name="command" type="text" spellcheck="false" autocapitalize="none" aria-describedby="terminal-help" autofocus>
+            <button type="submit" aria-label="Run command">Run</button>
+          </form>
+          <p class="sr-only" id="terminal-help">Enter a uname command, then select Run.</p>
+        </section>
+      </section>
+
+      <section class="panel knowledge-check" id="knowledge-check">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Check yourself</p>
+            <h2>Explain what you learned</h2>
+          </div>
+          <span id="quiz-status" class="status-pill">0 / 2 correct</span>
+        </div>
+        <div class="quiz-grid">
+          <fieldset class="question" data-question="release">
+            <legend>Which option shows the kernel release?</legend>
+            <label><input type="radio" name="release" value="-s"> <span><code>-s</code><small>Kernel name</small></span></label>
+            <label><input type="radio" name="release" value="-r"> <span><code>-r</code><small>Kernel release</small></span></label>
+            <label><input type="radio" name="release" value="-v"> <span><code>-v</code><small>Kernel build</small></span></label>
+            <p class="feedback" aria-live="polite"></p>
+          </fieldset>
+          <fieldset class="question" data-question="build">
+            <legend>Which option shows kernel build information?</legend>
+            <label><input type="radio" name="build" value="-r"> <span><code>-r</code><small>Kernel release</small></span></label>
+            <label><input type="radio" name="build" value="-v"> <span><code>-v</code><small>Kernel build</small></span></label>
+            <label><input type="radio" name="build" value="-a"> <span><code>-a</code><small>Full summary</small></span></label>
+            <p class="feedback" aria-live="polite"></p>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="panel final-challenge" id="challenge">
+        <div class="challenge-copy">
+          <p class="eyebrow">Final challenge</p>
+          <h2>No-hint ticket</h2>
+          <p>Your senior engineer asks for all available system information from <code>uname</code>. Enter the complete command.</p>
+          <form id="challenge-form" class="challenge-form" autocomplete="off">
+            <label class="sr-only" for="challenge-input">Command that shows all available uname information</label>
+            <span aria-hidden="true">$</span>
+            <input id="challenge-input" type="text" spellcheck="false" autocapitalize="none" placeholder="Enter the command">
+            <button class="button button-primary" type="submit">Check answer</button>
+          </form>
+          <p id="challenge-feedback" class="feedback" aria-live="polite"></p>
+        </div>
+        <div class="memory-card">
+          <span class="memory-icon" aria-hidden="true">*</span>
+          <strong>Exam memory hook</strong>
+          <p><code>r</code> means release. <code>v</code> means version, but for <code>uname</code> it reports the kernel build version.</p>
+        </div>
+      </section>
+
+      <section class="completion-card" id="completion-card" hidden>
+        <span class="completion-icon" aria-hidden="true">✓</span>
+        <div>
+          <p class="eyebrow">Lesson complete</p>
+          <h2>You can identify basic Linux system information.</h2>
+          <p>Your progress is saved in this browser. Lesson 2 will add Bash version practice using the same learn, practice, test pattern.</p>
+        </div>
+        <button class="button button-primary" type="button" id="review-lesson">Review commands</button>
+      </section>
+
+      <footer class="lesson-footer">
+        <p>Adapted from <strong>LPIC - Section 2</strong>, Lab 1: Identify Basic System Information.</p>
+        <p>Terminal output is simulated and may differ from your Linux Mint virtual machine.</p>
+      </footer>
+    </div>
+  </main>
+</body>
+</html>
