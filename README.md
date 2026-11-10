@@ -4,16 +4,21 @@ A static, interactive training app for LPIC-1 exam 101-500, built from scenario-
 workbooks. No framework, no build step, no external libraries. It runs from GitHub Pages, from
 a local web server, or straight from the folder.
 
-## What's in it (pilot)
+## What's in it
 
-- **Section 2: Command Line Basics (103.1)**: 8 lessons and a no-hint section ticket in a
-  simulated terminal. The terminal includes a small virtual filesystem, pipes and redirects,
-  history expansion, and a `man`/`info` pager with on-screen keys for iPhone.
-- **Section 15: Partitions, Filesystems and Swap (104.1, 104.3)**: 14 lessons you run on a
-  Linux Mint VM. Each lesson has steps with Copy buttons, an output-paste check, a
-  real-world trap and a quiz.
+- **Sections 2–12** run in a simulated terminal: text tools, redirects, find/grep, file
+  management, archives, a vi/nano simulator, permissions, processes and jobs (with tmux/screen),
+  and shell variables. Each lesson has tasks, a quiz and a no-hint challenge.
+- **Sections 13–23** are lessons you run on a Linux Mint VM (hardware, disks, boot, systemd,
+  packages, libraries, virtualization). Each has steps with Copy buttons, an output-paste check
+  and a quiz.
 - **A section review** for each section: a trap quiz, a challenge exam checklist, practical
   questions with model answers, and a mastery checklist.
+- **Section 24, review and practice exam** (`#/prep`): a 60-question, 90-minute practice exam
+  weighted by the 101-500 objectives, with a score by objective and a review of every answer;
+  a weak-areas table built from every answer you give; and 10-question drills by topic,
+  objective, weakest objectives or missed questions. Questions come from the lesson quizzes,
+  trap quizzes and command challenges (as fill-in-the-blank), so nothing is written twice.
 - **Progress** is saved in the browser (`localStorage` key `lpic-lab-trainer.v2`), with
   Export/Import on the home page. Progress from the original Lesson 1 moves over automatically.
 
@@ -33,6 +38,9 @@ styles.css            design system
 js/core.js            data registration, saved progress, helpers
 js/shell.js           simulated Bash shell and virtual filesystem
 js/engine.js          renders home, sections, lessons, reviews; grades tasks
+js/review.js          Section 24: practice exam, weak areas and drills (#/prep, #/exam, #/drill)
+js/commands-*.js      practice-terminal commands, grouped by section
+js/editor.js          vi and nano simulator
 data/course.js        section list and objective weights
 data/docs.js          short man, info and help pages for the practice terminal
 data/section-NN.js    one file per section

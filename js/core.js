@@ -90,6 +90,8 @@
       save();
     },
     setLast(route) { state.last = route; save(); },
+    /* Review area data: exam (in progress), lastExam, examHistory, missed. null removes the key. */
+    put(key, value) { if (value == null) delete state[key]; else state[key] = value; save(); },
     exportJSON() { return JSON.stringify(state, null, 1); },
     importJSON(text) {
       const data = JSON.parse(text);

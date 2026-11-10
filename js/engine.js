@@ -1,5 +1,5 @@
 /* LPIC-1 Lab Trainer: renders the home page, section pages, lessons and section reviews
-   from the data files, and grades tasks. Routes: #/  #/section/2  #/lesson/2.1  #/review/2 */
+   from the data files, and grades tasks. Routes: #/  #/section/2  #/lesson/2.1  #/review/2, plus the review area in review.js (#/prep #/exam #/drill) */
 (function () {
   "use strict";
   const LPIC = window.LPIC;
@@ -54,8 +54,10 @@
     const [kind, id] = hash.split("/");
     current = null;
     $("#reset-progress").hidden = true;
+    if (LPIC.prep) LPIC.prep.leave();
     try {
-      if (kind === "section" && sectionById(id)) renderSection(sectionById(id));
+      if (LPIC.prep && LPIC.prep.handles(kind)) LPIC.prep.render(kind, id, { view, setTopProgress, renderNav });
+      else if (kind === "section" && sectionById(id)) renderSection(sectionById(id));
       else if (kind === "lesson" && LPIC.findLesson(id)) renderLesson(LPIC.findLesson(id));
       else if (kind === "review" && sectionById(id)) renderReview(sectionById(id));
       else renderHome();
@@ -75,8 +77,9 @@
       const secs = LPIC.orderedSections();
       nav.innerHTML = `
         <div class="nav-heading"><p class="eyebrow">LPIC-1 101-500</p><h2>Sections</h2></div>
-        <ol class="lesson-list">${secs.map((s) => navItem(`#/section/${s.number}`, String(s.number).padStart(2, "0"), s.title, s.objectives.join(", "), sectionPct(s), false)).join("")}</ol>
-        <div class="nav-note"><strong>Work in progress</strong><p>More sections are added as they're built. Export your progress now and then as a backup.</p></div>`;
+        <ol class="lesson-list">${secs.map((s) => navItem(`#/section/${s.number}`, String(s.number).padStart(2, "0"), s.title, s.objectives.join(", "), sectionPct(s), false)).join("")}
+          ${LPIC.prep ? navItem("#/prep", "24", "Review and practice exam", "Course wrap-up · 60 questions, 90 minutes", null, activeId === "prep") : ""}</ol>
+        <div class="nav-note"><strong>Back up your progress</strong><p>Progress is saved in this browser only. Export it now and then from the home page.</p></div>`;
       return;
     }
     nav.innerHTML = `
@@ -114,6 +117,11 @@
             <span class="section-card-meta">${s.lessons.length} lessons · ${s.kind === "vm" ? "Run on your Linux Mint VM" : "Practice terminal in the browser"}</span>
             <span class="progress-track"><span style="width:${sectionPct(s)}%"></span></span>
           </a>`).join("")}
+        ${LPIC.prep ? `<a class="card section-card prep-card" href="#/prep">
+            <span class="eyebrow">Section 24 · All of exam 101-500</span>
+            <strong>Review and practice exam</strong>
+            <span class="section-card-meta">${store.state.exam ? "Practice exam in progress · tap to resume" : store.state.lastExam ? `Last practice exam: ${store.state.lastExam.pct}%` : "60-question practice exam, weak areas, quick practice"}</span>
+          </a>` : ""}
       </section>
       <section class="card">
         <div class="section-heading"><div><p class="eyebrow">Your progress</p><h2>Back up or move your progress</h2></div></div>

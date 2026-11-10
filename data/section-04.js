@@ -53,6 +53,7 @@
         ],
         challenge: {
           prompt: "Create <code>reboot-priority.txt</code> with the shortest reboot first. Enter the full command.",
+          examPrompt: "<code>patch-reboots.txt</code> has a server name and its reboot time in minutes on each line. Save it to <code>reboot-priority.txt</code>, sorted numerically on field 2. Enter the full command.",
           check: { accept: ["sort -k2 -n patch-reboots.txt > reboot-priority.txt", "sort -n -k2 patch-reboots.txt > reboot-priority.txt", "sort -k2n patch-reboots.txt > reboot-priority.txt", "sort -k 2 -n patch-reboots.txt > reboot-priority.txt", "sort -nk2 patch-reboots.txt > reboot-priority.txt"] },
           correct: "Correct. Numeric sort on field 2, saved to a new file.",
           incorrect: "Sort on field 2, numerically, and redirect into reboot-priority.txt.",
@@ -82,6 +83,7 @@
         ],
         challenge: {
           prompt: "Build <code>server-service-map.txt</code> from the two lists. Enter the command.",
+          examPrompt: "Join <code>server-list.txt</code> and <code>service-list.txt</code> side by side, line by line (servers first), into <code>server-service-map.txt</code>. Enter the command.",
           check: { accept: ["paste server-list.txt service-list.txt > server-service-map.txt"] },
           correct: "Correct. paste joins the files line by line.",
           incorrect: "Use paste with the server list first, then the service list, redirected to the new file.",
@@ -111,6 +113,7 @@
         ],
         challenge: {
           prompt: "Create <code>account-shell-report.txt</code> with each username and its shell. Enter the command.",
+          examPrompt: "<code>users-sample.txt</code> is in <code>/etc/passwd</code> format. Save each username and its login shell to <code>account-shell-report.txt</code> with <code>cut</code>. Enter the command.",
           check: { accept: ["cut -d: -f1,7 users-sample.txt > account-shell-report.txt", "cut -d ':' -f1,7 users-sample.txt > account-shell-report.txt", "cut -f1,7 -d: users-sample.txt > account-shell-report.txt", "cut -d: -f 1,7 users-sample.txt > account-shell-report.txt"] },
           correct: "Correct. Fields 1 and 7, colon-separated.",
           incorrect: "Use cut with a colon delimiter and fields 1 and 7, redirected to the report.",
