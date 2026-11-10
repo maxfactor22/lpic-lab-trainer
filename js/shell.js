@@ -77,11 +77,23 @@
     rm: "/usr/bin/rm", cp: "/usr/bin/cp", mv: "/usr/bin/mv", head: "/usr/bin/head", tail: "/usr/bin/tail",
     wc: "/usr/bin/wc", grep: "/usr/bin/grep", whoami: "/usr/bin/whoami", hostname: "/usr/bin/hostname",
     nano: "/usr/bin/nano", vi: "/usr/bin/vi", less: "/usr/bin/less", clear: "/usr/bin/clear", sleep: "/usr/bin/sleep",
-    whatis: "/usr/bin/whatis", apropos: "/usr/bin/apropos", sort: "/usr/bin/sort", rmdir: "/usr/bin/rmdir",
+    whatis: "/usr/bin/whatis", uniq: "/usr/bin/uniq", nl: "/usr/bin/nl", more: "/usr/bin/more",
+    md5sum: "/usr/bin/md5sum", sha1sum: "/usr/bin/sha1sum", sha256sum: "/usr/bin/sha256sum", sha512sum: "/usr/bin/sha512sum", apropos: "/usr/bin/apropos", sort: "/usr/bin/sort", rmdir: "/usr/bin/rmdir",
     echo: "/usr/bin/echo", pwd: "/usr/bin/pwd", printf: "/usr/bin/printf", test: "/usr/bin/test", "[": "/usr/bin/[",
     true: "/usr/bin/true", false: "/usr/bin/false", kill: "/usr/bin/kill", sudo: "/usr/bin/sudo",
   };
   const ALIASES = { ls: "ls --color=auto", grep: "grep --color=auto", ll: "ls -alF", la: "ls -A", l: "ls -CF" };
+
+  const PASSWD = [
+    "root:x:0:0:root:/root:/bin/bash", "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin", "bin:x:2:2:bin:/bin:/usr/sbin/nologin",
+    "sys:x:3:3:sys:/dev:/usr/sbin/nologin", "sync:x:4:65534:sync:/bin:/bin/sync", "games:x:5:60:games:/usr/games:/usr/sbin/nologin",
+    "man:x:6:12:man:/var/cache/man:/usr/sbin/nologin", "lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin", "mail:x:8:8:mail:/var/mail:/usr/sbin/nologin",
+    "news:x:9:9:news:/var/spool/news:/usr/sbin/nologin", "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin", "backup:x:34:34:backup:/var/backups:/usr/sbin/nologin",
+    "nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin", "systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin",
+    "messagebus:x:100:102::/nonexistent:/usr/sbin/nologin", "syslog:x:102:104::/nonexistent:/usr/sbin/nologin", "avahi:x:105:110:Avahi mDNS daemon,,,:/run/avahi-daemon:/usr/sbin/nologin",
+    "lightdm:x:113:119:Light Display Manager:/var/lib/lightdm:/bin/false", "max:x:1000:1000:Max,,,:/home/max:/bin/bash",
+  ].join("\n") + "\n";
+  const GROUP = ["root:x:0:", "adm:x:4:syslog,max", "cdrom:x:24:max", "sudo:x:27:max", "dip:x:30:max", "plugdev:x:46:max", "users:x:100:", "lpadmin:x:120:max", "max:x:1000:"].join("\n") + "\n";
 
   const DEFAULT_CANNED = {
     "uname": "Linux",
@@ -127,10 +139,14 @@
       this.vfs.write("/etc/hostname", this.host + "\n");
       this.vfs.write("/etc/os-release", 'NAME="Linux Mint"\nVERSION="22 (Wilma)"\nID=linuxmint\nID_LIKE="ubuntu debian"\n');
       this.vfs.write("/etc/shells", "/bin/sh\n/bin/bash\n/usr/bin/bash\n/bin/dash\n");
-      ["passwd", "group", "fstab", "hosts", "profile", "bash.bashrc"].forEach((f) => this.vfs.write("/etc/" + f, ""));
+      this.vfs.write("/etc/passwd", PASSWD.replace(/\bmax\b/g, this.user));
+      this.vfs.write("/etc/group", GROUP.replace(/\bmax\b/g, this.user));
+      ["fstab", "hosts", "profile", "bash.bashrc"].forEach((f) => this.vfs.write("/etc/" + f, ""));
       Object.keys(EXTERNAL).forEach((c) => this.vfs.write(EXTERNAL[c], ""));
       this.vfs.mkdirp(this.home);
-      this.vfs.write(this.home + "/.bashrc", "# ~/.bashrc\n");
+      this.vfs.write(this.home + "/.bashrc", "# ~/.bashrc: executed by bash(1) for non-login shells.\nHISTSIZE=1000\nHISTFILESIZE=2000\nalias ll='ls -alF'\n");
+      this.vfs.write(this.home + "/.profile", "# ~/.profile: executed by the command interpreter for login shells.\n");
+      this.vfs.write(this.home + "/.bash_logout", "# ~/.bash_logout: executed by bash(1) when login shell exits.\n");
       this.vfs.write(this.home + "/.bash_history", "");
 
       for (const [p, content] of Object.entries(opts.files || {})) {
@@ -610,12 +626,79 @@
     printenv(args) { return args.length ? { stdout: args.map((k) => this.env[k] ?? "").join("\n") + "\n" } : Shell.commands.env.call(this); },
 
     head(args, stdin) { return headTail.call(this, "head", args, stdin); },
-    tail(args, stdin) { return headTail.call(this, "tail", args, stdin); },
+    tail(args, stdin, res) {
+      const follow = args.some((a) => /^-[a-zA-Z0-9]*f/.test(a) || a === "--follow");
+      const rest = args.filter((a) => a !== "-f" && a !== "--follow").map((a) => (/^-\d*f$/.test(a) ? a.replace("f", "") : a)).filter((a) => a !== "-");
+      const r = headTail.call(this, "tail", rest, stdin);
+      if (follow && !r.stderr) {
+        const files = rest.filter((a) => !a.startsWith("-") && !/^\d+$/.test(a));
+        if (!files.length) return { stderr: "tail: -f needs a file name in this practice terminal", status: 1 };
+        res.follow = { path: this.abs(files[files.length - 1]), name: files[files.length - 1] };
+        res.events.push({ type: "follow-start", path: res.follow.path });
+      }
+      return r;
+    },
+
+    more(args, stdin, res) {
+      const r = Shell.commands.less.call(this, args, stdin, res);
+      if (res.pager) { res.pager.kind = "more"; res.events[res.events.length - 1].kind = "more"; }
+      return r;
+    },
+
+    uniq(args, stdin) {
+      const o = opts(args);
+      let text = stdin;
+      if (o.rest[0]) {
+        const n = this.vfs.get(this.abs(o.rest[0]));
+        if (!n || n.type !== "file") return { stderr: `uniq: ${o.rest[0]}: No such file or directory`, status: 1 };
+        text = n.content;
+      }
+      const lines = text.replace(/\n$/, "").split("\n");
+      if (!text) return {};
+      const same = (a, b) => (o.flags.has("i") ? a.toLowerCase() === b.toLowerCase() : a === b);
+      const groups = [];
+      for (const l of lines) { const g = groups[groups.length - 1]; if (g && same(g.line, l)) g.items.push(l); else groups.push({ line: l, items: [l] }); }
+      let out = [];
+      for (const g of groups) {
+        const n = g.items.length;
+        if (o.flags.has("d") && n < 2) continue;
+        if (o.flags.has("u") && n > 1) continue;
+        if (o.flags.has("D")) { if (n > 1) out.push(...g.items); continue; }
+        out.push(o.flags.has("c") ? `${pad(n, 7, " ")} ${g.line}` : g.line);
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "" };
+    },
+
+    nl(args, stdin) {
+      let all = false;
+      const files = [];
+      for (let i = 0; i < args.length; i++) {
+        const a = args[i];
+        if (a === "-ba" || (a === "-b" && args[i + 1] === "a")) { all = true; if (a === "-b") i++; }
+        else if (a === "-bt" || (a === "-b" && args[i + 1] === "t")) { all = false; if (a === "-b") i++; }
+        else files.push(a);
+      }
+      let text = stdin;
+      if (files.length) {
+        const n = this.vfs.get(this.abs(files[0]));
+        if (!n || n.type !== "file") return { stderr: `nl: ${files[0]}: No such file or directory`, status: 1 };
+        text = n.content;
+      }
+      if (!text) return {};
+      let k = 0;
+      const out = text.replace(/\n$/, "").split("\n").map((l) => (l === "" && !all ? "" : `${pad(++k, 6, " ")}\t${l}`));
+      return { stdout: out.join("\n") + "\n" };
+    },
+
+    md5sum(args, stdin) { return hashCmd.call(this, "md5", args, stdin); },
+    sha1sum(args, stdin) { return hashCmd.call(this, "sha1", args, stdin); },
+    sha256sum(args, stdin) { return hashCmd.call(this, "sha256", args, stdin); },
+    sha512sum(args, stdin) { return hashCmd.call(this, "sha512", args, stdin); },
 
     wc(args, stdin) {
       const o = opts(args);
-      const count = (txt) => ({ l: (txt.match(/\n/g) || []).length, w: (txt.match(/\S+/g) || []).length, c: txt.length });
-      const which = ["l", "w", "c"].filter((f) => o.flags.has(f));
+      const count = (txt) => ({ l: (txt.match(/\n/g) || []).length, w: (txt.match(/\S+/g) || []).length, m: [...txt].length, c: new TextEncoder().encode(txt).length });
+      const which = ["l", "w", "m", "c"].filter((f) => o.flags.has(f));
       const show = which.length ? which : ["l", "w", "c"];
       const line = (r, name) => show.map((f) => (show.length > 1 ? pad(r[f], 2, " ") : r[f])).join(" ") + (name ? " " + name : "");
       if (!o.rest.length) return { stdout: line(count(stdin)) + "\n" };
@@ -798,6 +881,41 @@
       return { stderr: `uname: this practice terminal knows these forms: uname, uname -s, -n, -r, -v, -m, -o, -a`, status: 1 };
     },
   };
+
+  /* md5sum / sha*sum, including -c to verify a saved checksum list. */
+  function hashCmd(algo, args, stdin) {
+    const fn = LPIC.hash[algo];
+    const name = algo + "sum";
+    const o = opts(args);
+    if (o.flags.has("c") || o.flags.has("check")) {
+      const out = [], err = [];
+      let bad = 0;
+      for (const listFile of o.rest.length ? o.rest : ["-"]) {
+        const list = listFile === "-" ? stdin : this.vfs.get(this.abs(listFile))?.content;
+        if (list === undefined) { err.push(`${name}: ${listFile}: No such file or directory`); continue; }
+        for (const line of list.split("\n").filter(Boolean)) {
+          const m = line.match(/^([0-9a-f]+)\s+\*?(.+)$/i);
+          if (!m) continue;
+          const node = this.vfs.get(this.abs(m[2]));
+          if (!node || node.type !== "file") { out.push(`${m[2]}: FAILED open or read`); bad++; continue; }
+          const ok = fn(node.content) === m[1].toLowerCase();
+          out.push(`${m[2]}: ${ok ? "OK" : "FAILED"}`);
+          if (!ok) bad++;
+        }
+      }
+      if (bad) err.push(`${name}: WARNING: ${bad} computed checksum${bad > 1 ? "s" : ""} did NOT match`);
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: bad || err.length ? 1 : 0 };
+    }
+    if (!o.rest.length) return { stdout: `${fn(stdin)}  -\n` };
+    const out = [], err = [];
+    for (const p of o.rest) {
+      const node = this.vfs.get(this.abs(p));
+      if (!node) err.push(`${name}: ${p}: No such file or directory`);
+      else if (node.type === "dir") err.push(`${name}: ${p}: Is a directory`);
+      else out.push(`${fn(node.content)}  ${p}`);
+    }
+    return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 1 : 0 };
+  }
 
   function headTail(cmd, args, stdin) {
     let n = 10;

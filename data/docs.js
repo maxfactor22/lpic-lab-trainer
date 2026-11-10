@@ -5,6 +5,10 @@
 (function () {
   "use strict";
   const man = (section, summary, text) => ({ section, summary, text });
+  /* Builds a short man page in the usual layout from a few parts. */
+  const page = (NAME, nameLine, synopsis, description, options) =>
+    `${NAME}(1)                        User Commands                        ${NAME}(1)\n\nNAME\n       ${nameLine}\n\nSYNOPSIS\n       ${synopsis}\n\nDESCRIPTION\n       ${description}\n\n` +
+    options.map(([o, d]) => `       ${o}\n              ${d}`).join("\n\n") + `\n\nGNU coreutils 9.4                 April 2024                        ${NAME}(1)`;
 
   window.LPIC.docs = {
     man: {
@@ -263,6 +267,34 @@ DESCRIPTION
               number all output lines
 
 GNU coreutils 9.4                 April 2024                         CAT(1)`),
+
+      head: man(1, "output the first part of files", page("HEAD", "head - output the first part of files", "head [OPTION]... [FILE]...",
+        "Print the first 10 lines of each FILE. With more than one FILE, each\n       part starts with a header naming the file.",
+        [["-n, --lines=[-]NUM", "print the first NUM lines; with a leading -, all but the last NUM lines"], ["-c, --bytes=[-]NUM", "print the first NUM bytes"], ["-NUM", "same as -n NUM"]])),
+      tail: man(1, "output the last part of files", page("TAIL", "tail - output the last part of files", "tail [OPTION]... [FILE]...",
+        "Print the last 10 lines of each FILE.",
+        [["-n, --lines=[+]NUM", "print the last NUM lines; with a leading +, start at line NUM"], ["-f, --follow", "keep printing new data as the file grows; stop with Ctrl+C"], ["-F", "like --follow, and keep retrying if the file is renamed or recreated (log rotation)"], ["-NUM", "same as -n NUM"]])),
+      less: man(1, "opposite of more", page("LESS", "less - opposite of more", "less [options] [file]...",
+        "A pager: show a file one screen at a time, moving forward and backward.\n       It doesn't read the whole file first, so it starts fast on large files.",
+        [["Space / b", "forward / back one screen"], ["/pattern  ?pattern", "search forward / backward; n repeats, N reverses"], ["g / G", "first / last line"], ["q", "quit"]])),
+      more: man(1, "file perusal filter for crt viewing", page("MORE", "more - file perusal filter for crt viewing", "more [options] file...",
+        "An older pager that shows a file one screen at a time. It moves\n       forward, and exits by itself at the end of the file.",
+        [["Space", "next screen"], ["Enter", "next line"], ["/pattern", "search forward"], ["q", "quit"]])),
+      wc: man(1, "print newline, word, and byte counts for each file", page("WC", "wc - print newline, word, and byte counts for each file", "wc [OPTION]... [FILE]...",
+        "Print counts for each FILE, in this order: lines, words, bytes.\n       With no FILE, read standard input.",
+        [["-l, --lines", "print the line (newline) count"], ["-w, --words", "print the word count"], ["-c, --bytes", "print the byte count"], ["-m, --chars", "print the character count"]])),
+      uniq: man(1, "report or omit repeated lines", page("UNIQ", "uniq - report or omit repeated lines", "uniq [OPTION]... [INPUT [OUTPUT]]",
+        "Collapse runs of identical ADJACENT lines into one. Lines that repeat\n       but aren't next to each other are not seen as duplicates, so sort\n       the input first when that matters.",
+        [["-c, --count", "prefix each line with how many times it occurred"], ["-d, --repeated", "only print lines that repeat, one copy each"], ["-D", "print every copy of repeated lines"], ["-u, --unique", "only print lines that don't repeat"], ["-i, --ignore-case", "ignore case when comparing"]])),
+      nl: man(1, "number lines of files", page("NL", "nl - number lines of files", "nl [OPTION]... [FILE]...",
+        "Write each FILE with line numbers added. By default, blank lines are\n       not numbered.",
+        [["-b a", "number all lines, including blank ones"], ["-b t", "number only non-empty lines (the default)"]])),
+      md5sum: man(1, "compute and check MD5 message digest", page("MD5SUM", "md5sum - compute and check MD5 message digest", "md5sum [OPTION]... [FILE]...",
+        "Print or check MD5 (128-bit, 32 hex characters) checksums. MD5 is\n       fine for catching accidental changes but is not collision-resistant,\n       so don't rely on it for security.",
+        [["-c, --check", "read checksums from a file and check them"]])),
+      sha256sum: man(1, "compute and check SHA256 message digest", page("SHA256SUM", "sha256sum - compute and check SHA256 message digest", "sha256sum [OPTION]... [FILE]...",
+        "Print or check SHA-256 (256-bit, 64 hex characters) checksums.\n       sha1sum (40), sha512sum (128) and the others work the same way.",
+        [["-c, --check", "read checksums from a file and check them; prints FILE: OK or FAILED"]])),
 
       date: man(1, "print or set the system date and time", `DATE(1)                       User Commands                       DATE(1)
 

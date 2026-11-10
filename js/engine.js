@@ -311,7 +311,10 @@
           <input id="terminal-input" name="command" type="text" spellcheck="false" autocapitalize="none" autocorrect="off" enterkeyhint="go" aria-describedby="terminal-help">
           <button type="submit" aria-label="Run command">Run <span aria-hidden="true">↵</span></button>
         </form>
+        <div class="follow-bar" id="terminal-panel-follow" hidden><span>tail -f is following the file. New lines appear as they're written.</span>
+          <button type="button" data-key="ctrl-c" class="ctrl-c">Ctrl+C</button></div>
         <div class="key-row" aria-label="Terminal keys">
+          <button type="button" data-key="ctrl-c" aria-label="Control C">^C</button>
           <button type="button" data-key="up" aria-label="Previous command">↑</button>
           <button type="button" data-key="down" aria-label="Next command">↓</button>
           <button type="button" data-key="!" >!</button>
@@ -385,8 +388,37 @@
     };
     const line = (text, cls) => { const p = document.createElement("p"); if (cls) p.className = cls; p.textContent = text; out.append(p); out.scrollTop = out.scrollHeight; };
 
+    /* tail -f: while following, the input acts as a second terminal, and new lines
+       written to the followed file stream into the output until Ctrl+C. */
+    let follow = null;
+    const fileText = (p) => { const n = shell.vfs.get(p); return n && n.type === "file" ? n.content : ""; };
+    const stopFollow = () => {
+      if (!follow) return;
+      line("^C", "terminal-command");
+      const ev = { type: "follow-stop", path: follow.path };
+      follow = null;
+      $("#terminal-panel-follow").hidden = true;
+      input.placeholder = "";
+      updatePrompt();
+      grade({ res: { events: [ev], out: [] }, shell });
+    };
+    current.stopFollow = stopFollow;
+
     const run = (raw) => {
       if (!raw.trim()) return;
+      if (follow) {
+        line(`[second terminal] ${shell.prompt()} ${raw}`, "terminal-muted");
+        const res = shell.run(raw);
+        res.out.forEach((o) => line("[second terminal] " + o.text, "terminal-muted"));
+        const now = fileText(follow.path);
+        if (now.length > follow.seen.length && now.startsWith(follow.seen)) {
+          now.slice(follow.seen.length).replace(/\n$/, "").split("\n").forEach((l) => line(l));
+          res.events.push({ type: "follow-new", path: follow.path });
+        }
+        follow.seen = now;
+        grade({ res, shell });
+        return;
+      }
       line(`${shell.prompt()} ${raw}`, "terminal-command");
       const res = shell.run(raw);
       if (res.clear) { out.replaceChildren(); }
@@ -394,6 +426,12 @@
       updatePrompt();
       grade({ res, shell });
       if (res.pager) openPager(res.pager);
+      if (res.follow) {
+        follow = { ...res.follow, seen: fileText(res.follow.path) };
+        $("#terminal-panel-follow").hidden = false;
+        $("#terminal-prompt").textContent = "2nd terminal$";
+        input.placeholder = "Following " + res.follow.name + ". Type here to act as a second terminal.";
+      }
     };
 
     $("#terminal-form").addEventListener("submit", (e) => {
@@ -415,16 +453,19 @@
       if (e.key === "ArrowUp") { e.preventDefault(); recallMove(-1); }
       if (e.key === "ArrowDown") { e.preventDefault(); recallMove(1); }
       if (e.key === "l" && e.ctrlKey) { e.preventDefault(); out.replaceChildren(); }
+      if (e.key === "c" && e.ctrlKey && follow && input.selectionStart === input.selectionEnd) { e.preventDefault(); stopFollow(); }
     });
     $$(".key-row button").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
     $$(".key-row button").forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.key;
+      if (k === "ctrl-c") return stopFollow();
       if (k === "up") return recallMove(-1);
       if (k === "down") return recallMove(1);
       const pos = input.selectionStart ?? input.value.length;
       input.value = input.value.slice(0, pos) + k + input.value.slice(pos);
       input.focus(); input.setSelectionRange(pos + 1, pos + 1);
     }));
+    $$(".follow-bar button").forEach((b) => b.addEventListener("click", () => { stopFollow(); input.focus(); }));
     $("#clear-terminal").addEventListener("click", () => { out.replaceChildren(); line("Terminal cleared. Your completed tasks are still saved.", "terminal-muted"); input.focus(); });
     $$(".command-chip").forEach((b) => b.addEventListener("click", () => { input.value = b.dataset.command; input.focus(); }));
     $$(".task-toggle").forEach((b) => b.addEventListener("click", () => {

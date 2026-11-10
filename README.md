@@ -48,6 +48,11 @@ python tools/vm_section.py tools/specs/s16.json tools/extras/section16.py data/s
 
 Then add `"section-16"` to `data/course.js` and a `<script>` tag to `index.html`.
 
+## Releasing an update
+
+Every `<script>` and stylesheet link in `index.html` ends in `?v=N`. Raise N with each release so
+phones and browsers fetch the new files rather than mixing old cached ones with new ones.
+
 ## Publish with GitHub Pages
 
 The workflow in `.github/workflows/deploy-pages.yml` publishes the site on every push to `main`.
