@@ -44,7 +44,7 @@
     const all = secs.flatMap((s) => s.lessons.flatMap((l) => lessonItems(l).map((i) => [l.id, i])));
     const done = all.filter(([l, i]) => store.isDone(l, i)).length;
     const pct = all.length ? Math.round((done / all.length) * 100) : 0;
-    setTopProgress("Course progress", pct, `${pct}% of the pilot sections`);
+    setTopProgress("Course progress", pct, `${pct}% of the sections built so far`);
   }
 
   /* ------------------------------------------------------------ routing */
@@ -76,7 +76,7 @@
       nav.innerHTML = `
         <div class="nav-heading"><p class="eyebrow">LPIC-1 101-500</p><h2>Sections</h2></div>
         <ol class="lesson-list">${secs.map((s) => navItem(`#/section/${s.number}`, String(s.number).padStart(2, "0"), s.title, s.objectives.join(", "), sectionPct(s), false)).join("")}</ol>
-        <div class="nav-note"><strong>Pilot</strong><p>Sections 2 and 15 are in the app so far. The rest follow once you're happy with how these work.</p></div>`;
+        <div class="nav-note"><strong>Work in progress</strong><p>More sections are added as they're built. Export your progress now and then as a backup.</p></div>`;
       return;
     }
     nav.innerHTML = `

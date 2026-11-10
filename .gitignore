@@ -3,3 +3,4 @@ Thumbs.db
 *.tmp
 ~$*
 COURSE-OUTLINE.md
+__pycache__/
