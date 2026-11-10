@@ -584,15 +584,18 @@
   C.nano = openIn("nano"); C.pico = openIn("nano");
   C.emacs = function () { return { stderr: "Command 'emacs' not found, but can be installed with:\nsudo apt install emacs-gtk  # version 1:29.3+1-1ubuntu2, or\nsudo apt install emacs-nox  # version 1:29.3+1-1ubuntu2\n(emacs saves with Ctrl+X Ctrl+S and exits with Ctrl+X Ctrl+C.)", status: 127 }; };
   C.readlink = function (args) {
-    const full = args.some((a) => /^-[a-z]*[fe]/.test(a) || a === "--canonicalize");
+    // Plain readlink prints one link's target; -f follows every link to the real path (-e also requires it to exist).
+    const full = args.some((a) => /^-[a-z]*[fem]/.test(a) || a === "--canonicalize");
+    const mustExist = args.some((a) => /^-[a-z]*e/.test(a));
     const files = args.filter((a) => !a.startsWith("-"));
     const out = [];
     let status = 0;
     for (const f of files) {
-      let p = this.abs(f);
-      if (!full) { if (LINKS[p]) out.push(LINKS[p]); else status = 1; continue; }
-      for (let i = 0; i < 10 && LINKS[p]; i++) p = LINKS[p].startsWith("/") ? LINKS[p] : "/" + LINKS[p];
-      out.push(p);
+      const abs = this.abs(f);
+      if (!full) { const n = this.vfs.lget(abs); if (n && n.type === "link") out.push(n.target); else status = 1; continue; }
+      const w = this.vfs.walk(abs, true);
+      if (mustExist && !w.node) { status = 1; continue; }
+      out.push(w.real);
     }
     return { stdout: out.length ? out.join("\n") + "\n" : "", status };
   };

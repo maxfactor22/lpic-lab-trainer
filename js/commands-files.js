@@ -21,14 +21,17 @@
     }
     return { f, rest };
   }
-  const kindOf = (n) => (n.type === "dir" ? "directory" : (n.content || "").length ? "regular file" : "regular empty file");
+  const kindOf = (n) => ({ dir: "directory", link: "symbolic link", fifo: "fifo", sock: "socket", chr: "character special file", blk: "block special file" }[n.type] || ((n.content || "").length ? "regular file" : "regular empty file"));
   const clone = (n) => (n.type === "dir"
-    ? { type: "dir", children: Object.fromEntries(Object.entries(n.children).map(([k, v]) => [k, clone(v)])), mtime: Date.now(), mode: n.mode }
-    : { type: "file", content: n.content, mtime: Date.now(), mode: n.mode });
+    ? { ...cloneMeta(n), type: "dir", children: Object.fromEntries(Object.entries(n.children).map(([k, v]) => [k, clone(v)])) }
+    : n.type === "link" ? { ...cloneMeta(n), type: "link", target: n.target, perm: 0o777 } : { ...cloneMeta(n), type: n.type, content: n.content });
+  let cloneActor = "max", cloneUmask = 0o002;
+  const cloneMeta = (n) => ({ owner: cloneActor, group: cloneActor === "root" ? "root" : cloneActor, perm: ((n.perm ?? (n.type === "dir" ? 0o775 : 0o664)) & ~cloneUmask) & 0o777, mtime: Date.now(), nlink: 1 });
   const ask = (q) => window.confirm(q);
 
   /* ------------------------------------------------------------- cp */
   C.cp = function (args) {
+    cloneActor = this.vfs.actor || this.user; cloneUmask = this.umask ?? 0o002;
     const p = parse(args, { "--recursive": "r", "--interactive": "i", "--verbose": "v", "--force": "f", "--archive": "a", "--no-clobber": "n" });
     if (p.bad) return { stderr: `cp: option ${p.bad} isn't part of these lessons`, status: 1 };
     const { f, rest } = p;
@@ -181,22 +184,25 @@
     if (!files.length) return { stderr: "stat: missing operand\nTry 'stat --help' for more information.", status: 1 };
     const out = [], err = [];
     for (const r of files) {
-      const n = this.vfs.get(this.abs(r));
+      const n = args.includes("-L") ? this.vfs.get(this.abs(r)) : this.vfs.lget(this.abs(r));
       if (!n) { err.push(`stat: cannot statx '${r}': No such file or directory`); continue; }
-      n.inode = n.inode || ++inodeSeq;
-      const size = n.type === "dir" ? 4096 : new TextEncoder().encode(n.content || "").length;
-      const mode = n.mode || (n.type === "dir" ? "drwxr-xr-x" : "-rw-r--r--");
-      const octal = "0" + [1, 4, 7].map((i) => (mode[i] === "r" ? 4 : 0) + (mode[i + 1] === "w" ? 2 : 0) + (/[xs]/.test(mode[i + 2]) ? 1 : 0)).join("");
+      if (!this.vfs.canTraverse(this.abs(r))) { err.push(`stat: cannot statx '${r}': Permission denied`); continue; }
+      n.inode = LPIC.perm.inodeOf(n);
+      const size = n.type === "dir" ? 4096 : n.type === "link" ? n.target.length : new TextEncoder().encode(n.content || "").length;
+      const mode = LPIC.perm.modeString(n);
+      const octal = (LPIC.perm.permOf(n) & 0o7777).toString(8).padStart(4, "0");
+      const own = LPIC.perm.owner(n), grp = LPIC.perm.group(n), links = LPIC.perm.linksOf(n);
+      const uid = own === "root" ? 0 : own === "nobody" ? 65534 : 1000, gid = { root: 0, adm: 4, disk: 6, cdrom: 24, shadow: 42, nogroup: 65534 }[grp] ?? 1000;
       const a = n.atime || n.mtime, m = n.mtime, c = n.ctime || n.mtime;
       if (fmt) {
-        out.push(fmt.replace(/%([nsyYxXzZaAFiUGh])/g, (x, k) => ({ n: r, s: size, y: stamp(m), Y: Math.floor(m / 1000), x: stamp(a), X: Math.floor(a / 1000), z: stamp(c), Z: Math.floor(c / 1000), a: octal.slice(1), A: mode, F: kindOf(n), i: n.inode, U: this.user, G: this.user, h: n.type === "dir" ? 2 : 1 }[k])));
+        out.push(fmt.replace(/\\n/g, "\n").replace(/%([nsyYxXzZaAFiUGhugN])/g, (x, k) => ({ n: r, s: size, y: stamp(m), Y: Math.floor(m / 1000), x: stamp(a), X: Math.floor(a / 1000), z: stamp(c), Z: Math.floor(c / 1000), a: (LPIC.perm.permOf(n) & 0o7777).toString(8), A: mode, F: kindOf(n), i: n.inode, U: own, G: grp, u: uid, g: gid, h: links, N: n.type === "link" ? `'${r}' -> '${n.target}'` : `'${r}'` }[k])));
         continue;
       }
       out.push(
-        `  File: ${r}`,
+        `  File: ${n.type === "link" ? `${r} -> ${n.target}` : r}`,
         `  Size: ${String(size).padEnd(10)}\tBlocks: ${String(n.type === "dir" ? 8 : Math.ceil(size / 4096) * 8).padEnd(10)} IO Block: 4096   ${kindOf(n)}`,
-        `Device: 8,2\tInode: ${String(n.inode).padEnd(11)} Links: ${n.type === "dir" ? 2 : 1}`,
-        `Access: (${octal}/${mode})  Uid: ( 1000/${this.user.padStart(8)})   Gid: ( 1000/${this.user.padStart(8)})`,
+        `Device: 8,2\tInode: ${String(n.inode).padEnd(11)} Links: ${links}${n.type === "chr" || n.type === "blk" ? `     Device type: ${n.major},${n.minor}` : ""}`,
+        `Access: (${octal}/${mode})  Uid: (${String(uid).padStart(5)}/${own.padStart(8)})   Gid: (${String(gid).padStart(5)}/${grp.padStart(8)})`,
         `Access: ${stamp(a)}`, `Modify: ${stamp(m)}`, `Change: ${stamp(c)}`, ` Birth: ${stamp(n.btime || c)}`,
       );
     }
@@ -220,7 +226,7 @@
     const old = Date.now() - ms > 182 * 864e5 || ms - Date.now() > 3600e3;
     return `${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2)} ${old ? String(d.getFullYear()).padStart(5) : `${p2(d.getHours())}:${p2(d.getMinutes())}`}`;
   };
-  const sizeOfNode = (n) => (n.type === "dir" ? 4096 : new TextEncoder().encode(n.content || "").length);
+  const sizeOfNode = (n) => (n.type === "dir" ? 4096 : n.type === "link" ? (n.target || "").length : new TextEncoder().encode(n.content || "").length);
   const blocksOf = (n) => (n.type === "dir" ? 4 : Math.ceil(sizeOfNode(n) / 4096) * 4);
   C.ls = function (args, stdin, res, ctx = {}) {
     const flags = new Set(), targets = [];
@@ -237,25 +243,32 @@
     const byTime = flags.has("t"), bySize = flags.has("S"), reverse = flags.has("r"), inode = flags.has("i");
     if (!targets.length) targets.push(".");
     const err = [], out = [];
-    const suffix = (n) => (classify && n.type === "dir" ? "/" : flags.has("F") && n.mode && /x/.test(n.mode) && n.type !== "dir" ? "*" : "");
+    const suffix = (n) => (classify && n.type === "dir" ? "/" : !flags.has("F") ? "" : n.type === "link" ? (long ? "" : "@") : n.type === "fifo" ? "|" : n.type === "sock" ? "=" : n.type === "file" && LPIC.perm.permOf(n) & 0o111 ? "*" : "");
     const longRows = (items) => {
-      const rows = items.map(([name, n]) => ({ name: name + suffix(n), mode: n.mode || (n.type === "dir" ? "drwxr-xr-x" : "-rw-r--r--"), links: String(n.type === "dir" ? 2 + Object.values(n.children).filter((c) => c.type === "dir").length : 1),
-        size: human ? humanSize(sizeOfNode(n)) : String(sizeOfNode(n)), date: lsDate(n.mtime), ino: String(n.inode || (n.inode = 1310000 + Math.floor(Math.random() * 9000))) }));
+      const rows = items.map(([name, n]) => ({ name: name + suffix(n) + (n.type === "link" ? ` -> ${n.target}` : ""), mode: LPIC.perm.modeString(n), links: String(LPIC.perm.linksOf(n)),
+        owner: LPIC.perm.owner(n), group: LPIC.perm.group(n),
+        size: n.type === "chr" || n.type === "blk" ? `${n.major}, ${n.minor}` : human ? humanSize(sizeOfNode(n)) : String(sizeOfNode(n)), date: lsDate(n.mtime), ino: String(LPIC.perm.inodeOf(n)) }));
       const w = (k) => Math.max(...rows.map((r) => r[k].length));
-      const [wl, ws, wi] = [w("links"), w("size"), w("ino")];
-      return rows.map((r) => `${inode ? r.ino.padStart(wi) + " " : ""}${r.mode} ${r.links.padStart(wl)} ${this.user} ${this.user} ${r.size.padStart(ws)} ${r.date} ${r.name}`);
+      const [wl, ws, wi, wo, wg] = [w("links"), w("size"), w("ino"), w("owner"), w("group")];
+      return rows.map((r) => `${inode ? r.ino.padStart(wi) + " " : ""}${r.mode} ${r.links.padStart(wl)} ${r.owner.padEnd(wo)} ${r.group.padEnd(wg)} ${r.size.padStart(ws)} ${r.date} ${r.name}`);
     };
     const order = (items) => {
       items.sort((a, b) => (byTime ? b[1].mtime - a[1].mtime : bySize ? sizeOfNode(b[1]) - sizeOfNode(a[1]) : 0) || a[0].replace(/^\./, "").localeCompare(b[0].replace(/^\./, ""), "en"));
       if (reverse) items.reverse();
       return items;
     };
-    const short = (items) => (one ? items.map(([nm, n]) => (inode ? (n.inode || "") + " " : "") + nm + suffix(n)) : items.length ? [items.map(([nm, n]) => nm + suffix(n)).join("  ")] : []);
+    const short = (items) => (one ? items.map(([nm, n]) => (inode ? LPIC.perm.inodeOf(n) + " " : "") + nm + suffix(n)) : items.length ? [items.map(([nm, n]) => (inode ? LPIC.perm.inodeOf(n) + " " : "") + nm + suffix(n)).join("  ")] : []);
     const fileItems = [], dirs = [];
     for (const t of targets) {
-      const n = this.vfs.get(this.abs(t));
-      if (!n) { err.push(`ls: cannot access '${t}': No such file or directory`); continue; }
-      if (n.type === "file" || flags.has("d")) fileItems.push([t, n]); else dirs.push([t, n]);
+      const abs = this.abs(t);
+      const ln = t.endsWith("/") ? this.vfs.get(abs) : this.vfs.lget(abs);
+      if (!ln) { err.push(`ls: cannot access '${t}': No such file or directory`); continue; }
+      if (!this.vfs.canTraverse(abs)) { err.push(`ls: cannot access '${t}': Permission denied`); continue; }
+      // A link to a directory is listed as the link with -l or -d; otherwise ls shows the directory's contents.
+      const n = ln.type === "link" && !long && !flags.has("d") ? this.vfs.get(abs) || ln : ln;
+      if (n.type !== "dir" || flags.has("d")) { fileItems.push([t, n]); continue; }
+      if (!this.vfs.can(n, "r")) { err.push(`ls: cannot open directory '${t}': Permission denied`); continue; }
+      dirs.push([t, n]);
     }
     if (fileItems.length) out.push(...(long ? longRows(order(fileItems)) : short(order(fileItems))));
     const multi = targets.length > 1 || flags.has("R");
@@ -282,6 +295,11 @@
   /* ------------------------------------------------------------- file */
   function describe(n) {
     if (n.type === "dir") return "directory";
+    if (n.type === "link") return `symbolic link to ${n.target}`;
+    if (n.type === "fifo") return "fifo (named pipe)";
+    if (n.type === "sock") return "socket";
+    if (n.type === "chr") return `character special (${n.major}/${n.minor})`;
+    if (n.type === "blk") return `block special (${n.major}/${n.minor})`;
     const archive = LPIC.archiveDescribe && LPIC.archiveDescribe(n);
     if (archive) return archive;
     const t = n.content || "";
@@ -308,7 +326,7 @@
     if (!files.length) return { stderr: "Usage: file [-bchikLlNnprsSvzZ0] [--apple] [--extension] [--mime-encoding]\n            [--mime-type] [-e <testname>] [-F <separator>]  [-f <namefile>]\n            [-m <magicfiles>] [-P <parameter=value>] [--exclude-quiet]\n            <file> ...\n       file -C [-m <magicfiles>]\n       file [--help]", status: 1 };
     const width = Math.max(...files.map((x) => x.length)) + 1;
     const out = files.map((r) => {
-      const n = this.vfs.get(this.abs(r));
+      const n = args.includes("-L") ? this.vfs.get(this.abs(r)) : this.vfs.lget(this.abs(r));
       const d = n ? describe(n) : `cannot open \`${r}' (No such file or directory)`;
       return p.f.has("b") ? d : `${(r + ":").padEnd(width)} ${d}`;
     });

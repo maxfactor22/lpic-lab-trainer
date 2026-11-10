@@ -9,7 +9,18 @@
   /* ------------------------------------------------------------------ VFS */
 
   class VFS {
-    constructor() { this.root = { type: "dir", children: {}, mtime: Date.now() }; }
+    /* Nodes: { type: "file"|"dir"|"link"|"fifo"|"sock"|"chr"|"blk", content|children|target,
+       owner, group, perm (numeric, with 0o4000 SUID, 0o2000 SGID, 0o1000 sticky), mtime, nlink }.
+       Symbolic links are followed by get() and by every directory along a path; lget() stops at a
+       final link. Hard links are the same node object under two names (nlink counts them).
+       vfs.actor is the user running the current command; vfs.check(abs, want) enforces modes. */
+    constructor() {
+      this.root = { type: "dir", children: {}, mtime: Date.now(), owner: "root", group: "root", perm: 0o755 };
+      this.actor = null;      // null while the system is being built: no permission checks
+      this.groupsOf = () => [];
+      this.umask = 0o002;
+      this.homeOwner = null;  // { prefix, user } so files under the home folder belong to the user
+    }
 
     static split(path) { return path.split("/").filter(Boolean); }
 
@@ -22,44 +33,113 @@
       return "/" + parts.join("/");
     }
 
-    get(abs) {
-      let node = this.root;
-      for (const p of VFS.split(abs)) {
-        if (!node || node.type !== "dir") return null;
-        node = node.children[p];
+    /* Walk a path, following links in the middle (and at the end when followFinal).
+       Returns { node, real, parent, name } where real is the path with links resolved. */
+    walk(abs, followFinal = true) {
+      let parts = VFS.split(abs), stack = [], node = this.root, parent = null, hops = 0;
+      for (let i = 0; i < parts.length; i++) {
+        if (!node || node.type !== "dir") return { node: null, real: "/" + [...stack, ...parts.slice(i)].join("/"), parent: null, notDir: !!node };
+        const name = parts[i];
+        const child = node.children[name];
+        const last = i === parts.length - 1;
+        if (child && child.type === "link" && (!last || followFinal)) {
+          if (++hops > 40) return { node: null, real: abs, loop: true };
+          const target = this.resolve(child.target, "/" + stack.join("/"));
+          parts = [...VFS.split(target), ...parts.slice(i + 1)];
+          node = this.root; stack = []; parent = null; i = -1;
+          continue;
+        }
+        parent = node;
+        if (!child) return { node: null, real: "/" + [...stack, name].join("/"), parent: last ? node : null, name };
+        stack.push(name);
+        node = child;
       }
-      return node || null;
+      return { node, real: "/" + stack.join("/"), parent, name: stack[stack.length - 1] };
     }
+    get(abs) { return this.walk(abs, true).node; }
+    lget(abs) { return this.walk(abs, false).node; }
+    realpath(abs) { return this.walk(abs, true).real; }
 
     parentOf(abs) {
       const parts = VFS.split(abs);
       const name = parts.pop();
-      return { dir: this.get("/" + parts.join("/")), name };
+      return { dir: this.get("/" + parts.join("/")), name, dirPath: "/" + parts.join("/") };
     }
 
-    mkdirp(abs) {
+    /* Ownership and mode for a node being created at abs inside parent. */
+    meta(type, abs, parent) {
+      const h = this.homeOwner;
+      let owner = this.actor || (h && (abs === h.prefix || abs.startsWith(h.prefix + "/")) ? h.user : "root");
+      if (!this.actor && abs.startsWith("/tmp/") && h) owner = h.user;
+      let group = owner === "root" ? "root" : owner;
+      const base = type === "dir" ? 0o777 : 0o666;
+      let perm = this.actor ? base & ~this.umask : type === "dir" ? (owner === "root" ? 0o755 : 0o775) : (owner === "root" ? 0o644 : 0o664);
+      if (parent && parent.perm & 0o2000) { group = parent.group; if (type === "dir") perm |= 0o2000; } // SGID directory
+      return { owner, group, perm, mtime: Date.now(), nlink: 1 };
+    }
+
+    /* Permission check for the current actor. want: "r", "w" or "x". */
+    can(node, want) {
+      if (!this.actor || this.actor === "root") return want !== "x" || node.type === "dir" || (node.perm & 0o111) !== 0;
+      const shift = node.owner === this.actor ? 6 : this.groupsOf(this.actor).includes(node.group) ? 3 : 0;
+      const bit = { r: 4, w: 2, x: 1 }[want];
+      return ((node.perm >> shift) & bit) !== 0;
+    }
+    /* Every directory on the way to abs must be searchable (x). */
+    canTraverse(abs) {
+      if (!this.actor || this.actor === "root") return true;
       let node = this.root;
+      const parts = VFS.split(this.walk(abs, false).real);
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!this.can(node, "x")) return false;
+        node = node.children[parts[i]];
+        if (!node || node.type !== "dir") return true;
+      }
+      return this.can(node, "x");
+    }
+    denied() { const e = new Error("Permission denied"); e.code = "EACCES"; return e; }
+
+    mkdirp(abs) {
+      let node = this.root, path = "";
       for (const p of VFS.split(abs)) {
-        if (!node.children[p]) node.children[p] = { type: "dir", children: {}, mtime: Date.now() };
-        node = node.children[p];
+        path += "/" + p;
+        let child = node.children[p];
+        if (child && child.type === "link") { child = this.get(path); }
+        if (!child) {
+          if (this.actor && (!this.can(node, "w") || !this.can(node, "x"))) throw this.denied();
+          child = node.children[p] = { type: "dir", children: {}, ...this.meta("dir", path, node) };
+        }
+        node = child;
         if (node.type !== "dir") throw new Error("Not a directory");
       }
       return node;
     }
 
     write(abs, content, append = false) {
-      const { dir, name } = this.parentOf(abs);
-      if (!dir || dir.type !== "dir") throw new Error("No such file or directory");
-      const cur = dir.children[name];
-      if (cur && cur.type === "dir") throw new Error("Is a directory");
-      if (cur && append) cur.content += content;
-      else dir.children[name] = { type: "file", content, mtime: Date.now() };
-      dir.children[name].mtime = Date.now();
+      const w = this.walk(abs, true);            // writing through a symbolic link writes its target
+      if (!w.parent && !w.node) throw new Error(w.notDir ? "Not a directory" : "No such file or directory");
+      if (w.node && w.node.type === "dir") throw new Error("Is a directory");
+      if (!this.canTraverse(w.real)) throw this.denied();
+      if (w.node) {
+        if (this.actor && !this.can(w.node, "w")) throw this.denied();
+        w.node.content = append ? (w.node.content || "") + content : content;
+        w.node.mtime = Date.now();
+        return w.node;
+      }
+      if (this.actor && (!this.can(w.parent, "w") || !this.can(w.parent, "x"))) throw this.denied();
+      const node = { type: "file", content, ...this.meta("file", w.real, w.parent) };
+      w.parent.children[w.name] = node;
+      return node;
     }
 
     remove(abs) {
-      const { dir, name } = this.parentOf(abs);
-      if (dir?.children[name]) delete dir.children[name];
+      const parts = VFS.split(abs);
+      const name = parts.pop();
+      const dir = this.get("/" + parts.join("/"));
+      const node = dir && dir.children[name];
+      if (!node) return;
+      delete dir.children[name];
+      if (node.nlink > 1) node.nlink--;
     }
   }
 
@@ -124,6 +204,8 @@
       this.host = opts.host || "linux-mint";
       this.home = "/home/" + this.user;
       this.vfs = new VFS();
+      this.vfs.homeOwner = { prefix: this.home, user: this.user };
+      this.vfs.groupsOf = (u) => (LPIC.groupsOf ? LPIC.groupsOf(u) : [u]);
       this.env = { HOME: this.home, USER: this.user, LOGNAME: this.user, SHELL: "/bin/bash", HOSTNAME: this.host,
         PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", LANG: "en_US.UTF-8", TERM: "xterm-256color", BASH_VERSION: "5.2.21(1)-release" };
       this.canned = { ...DEFAULT_CANNED, ...(opts.canned || {}) };
@@ -179,6 +261,7 @@
       this.cwd = this.vfs.resolve(this.expandTilde(opts.cwd || "~"), this.home);
       this.vfs.mkdirp(this.cwd);
       this.env.PWD = this.cwd;
+      (LPIC.shellInit || []).forEach((f) => f(this));
     }
 
     expandTilde(p) { return p === "~" ? this.home : p.startsWith("~/") ? this.home + p.slice(1) : p; }
@@ -239,6 +322,14 @@
         if (!item.text.trim()) continue;
         if (item.op === "&&" && this.lastStatus !== 0) continue;
         if (item.op === "||" && this.lastStatus === 0) continue;
+        // ( commands ) run in a subshell: cd, variables and umask changes don't leak out.
+        const sub = item.text.trim().match(/^\(([\s\S]*)\)$/);
+        if (sub && this.runSubshell) {
+          const r = this.runSubshell(sub[1]);
+          res.out.push(...r.out);
+          res.events.push(...r.events);
+          continue;
+        }
         let tokens;
         try { tokens = this.tokenize(item.text); }
         catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return res; }
@@ -265,7 +356,7 @@
         if (c === "\\" && i + 1 < line.length) { cur += c + line[i + 1]; i += 2; continue; }
         if (c === "'" || c === '"' || c === "`") { q = c; cur += c; i++; continue; }
         if (c === "$" && line[i + 1] === "(") { depth++; cur += "$("; i += 2; continue; }
-        if (c === "(" && depth) { depth++; cur += c; i++; continue; }
+        if (c === "(") { depth++; cur += c; i++; continue; } // a ( subshell ) or $( ) keeps its ; and && inside
         if (c === ")" && depth) { depth--; cur += c; i++; continue; }
         if (c === "#" && !depth && (i === 0 || /\s/.test(line[i - 1]))) break;
         if (!depth && (line.startsWith("&&", i) || line.startsWith("||", i))) { parts.push({ op, text: cur }); op = line.slice(i, i + 2); cur = ""; i += 2; continue; }
