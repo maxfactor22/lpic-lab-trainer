@@ -456,7 +456,33 @@
     /* Here-documents: "cmd <<EOF" waits for more lines at a "> " prompt until the
        delimiter line, then runs the whole thing as one command. */
     let heredoc = null;
+    /* A line ending in a backslash continues on the next line, at the PS2 prompt. */
+    let cont = null;
+    const ps2 = () => (shell.ps2 ? shell.ps2() : ">");
+    const endsWithBackslash = (s) => /(^|[^\\])(\\\\)*\\$/.test(s);
     const run = (raw) => {
+      if (cont) {
+        line(`${ps2()} ${raw}`, "terminal-command");
+        if (endsWithBackslash(raw)) { cont.text += raw.slice(0, -1); return; }
+        const full = cont.text + raw;
+        cont = null;
+        updatePrompt();
+        shell.history.push(full.trim());
+        const res = shell.run(" " + full);
+        res.expanded = full.trim();
+        res.out.forEach((o) => line(o.text, o.cls));
+        updatePrompt();
+        grade({ res, shell });
+        renderMux();
+        if (res.screen) openApp(res.screen.app);
+        return;
+      }
+      if (!heredoc && !follow && !busy() && endsWithBackslash(raw)) {
+        line(`${shell.prompt()} ${raw}`, "terminal-command");
+        cont = { text: raw.slice(0, -1) };
+        $("#terminal-prompt").textContent = ps2();
+        return;
+      }
       if (heredoc) {
         line("> " + raw, "terminal-command");
         heredoc.lines.push(raw);

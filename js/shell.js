@@ -331,6 +331,36 @@
         if (!item.text.trim()) continue;
         if (item.op === "&&" && this.lastStatus !== 0) continue;
         if (item.op === "||" && this.lastStatus === 0) continue;
+        const im = item.text.trim().match(/^if\s+([\s\S]*)$/);
+        if (im) {
+          // if COND; then ...; [elif COND; then ...;] [else ...;] fi
+          const clauses = [];
+          let cur = { cond: [{ ...item, op: null, text: im[1] }], body: [] }, mode = "cond", depth = 0, end = -1;
+          for (let k = n + 1; k < lists.length; k++) {
+            const t = lists[k].text.trim();
+            const core = t.replace(/^(then|else|do)\s+/, ""); // "then if …" starts a nested if
+            if (/^if\s/.test(core)) depth++;
+            if (/^fi\b/.test(t)) { if (depth === 0) { end = k; break; } depth--; }
+            let m;
+            if (depth === 0 && (m = t.match(/^then\b\s*([\s\S]*)$/))) { mode = "body"; if (m[1]) cur.body.push({ ...lists[k], op: null, text: m[1] }); continue; }
+            if (depth === 0 && (m = t.match(/^elif\s+([\s\S]*)$/))) { clauses.push(cur); cur = { cond: [{ ...lists[k], op: null, text: m[1] }], body: [] }; mode = "cond"; continue; }
+            if (depth === 0 && (m = t.match(/^else\b\s*([\s\S]*)$/))) { clauses.push(cur); cur = { cond: null, body: [] }; mode = "body"; if (m[1]) cur.body.push({ ...lists[k], op: null, text: m[1] }); continue; }
+            cur[mode].push(lists[k]);
+          }
+          clauses.push(cur);
+          if (end < 0) { res.out.push({ text: "bash: syntax error: unexpected end of file", cls: "terminal-error" }); this.lastStatus = 2; return; }
+          this.lastStatus = 0;
+          for (const c of clauses) {
+            if (!c.cond) { this.runItems(c.body, res); break; }
+            this.runItems(c.cond, res);
+            if (res.exit) break;
+            if (this.lastStatus === 0) { this.runItems(c.body, res); break; }
+            this.lastStatus = 0;
+          }
+          n = end;
+          if (res.pager || res.clear || res.exit || res.foreground || res.screen) break;
+          continue;
+        }
         const fm = item.text.trim().match(/^for\s+([A-Za-z_]\w*)(?:\s+in\s+([\s\S]*))?$/);
         if (fm) {
           // Collect items up to the matching "done"; nested loops count do/done pairs.
@@ -338,7 +368,8 @@
           const body = [];
           for (let k = n + 1; k < lists.length; k++) {
             const t = lists[k].text.trim();
-            if (/^for\s/.test(t) || /^while\s/.test(t)) depth++;
+            const core = t.replace(/^(then|else|do)\s+/, "");
+            if (/^for\s/.test(core) || /^while\s/.test(core)) depth++;
             if (t === "done" || /^done\b/.test(t)) { if (depth === 0) { end = k; break; } depth--; }
             body.push(k === n + 1 ? { ...lists[k], text: lists[k].text.replace(/^\s*do\b\s*/, "") } : lists[k]);
           }
@@ -444,7 +475,8 @@
       const tokens = [];
       let i = 0, word = null;
       const start = () => { if (!word) word = { word: "", glob: false, brace: false, quoted: false }; };
-      const push = () => { if (word) { tokens.push(word); word = null; } };
+      // An unquoted expansion that comes out empty leaves no word at all ("echo $UNSET x" is "echo x").
+      const push = () => { if (word) { if (word.word !== "" || word.quoted) tokens.push(word); word = null; } };
       const ops = ["&>>", "&>", "2>>", "2>&1", "2>", "1>&2", "1>>", "1>", ">&2", ">>", "&&", "||", ">", "<", "|", ";"];
       while (i < line.length) {
         const c = line[i];
@@ -475,7 +507,15 @@
           i++; continue;
         }
         if (c === "\\") { word.word += line[i + 1] || ""; word.quoted = true; i += 2; continue; }
-        if (c === "$") { const r = this.dollar(line, i); word.word += r.value.replace(/\s*\n\s*/g, " "); i = r.end; continue; } // unquoted: newlines split words
+        if (c === "$") {
+          // Unquoted, the value is split into words on spaces, tabs and newlines, except in an
+          // assignment (NAME=$VALUE keeps it whole, as Bash does).
+          const r = this.dollar(line, i);
+          i = r.end;
+          if (/^[A-Za-z_]\w*=/.test(word.word) || !/[ \t\n]/.test(r.value)) { word.word += r.value; continue; }
+          r.value.split(/[ \t\n]+/).forEach((part, k) => { if (k > 0) { push(); start(); } word.word += part; });
+          continue;
+        }
         if (c === "~" && word.word === "" && (i + 1 >= line.length || /[\/\s]/.test(line[i + 1]))) { word.word += this.home; i++; continue; }
         if (c === "*" || c === "?" || c === "[") word.glob = true;
         if (c === "{") word.brace = true;
@@ -507,8 +547,26 @@
         const sub = this.runCapture(inner);
         return { value: sub.replace(/\n+$/, ""), end: j + 1 };
       }
-      if ((m = rest.match(/^\{(\w+)\}/))) return { value: this.env[m[1]] ?? "", end: i + 1 + m[0].length };
-      if ((m = rest.match(/^\w+/))) return { value: this.env[m[0]] ?? "", end: i + 1 + m[0].length };
+      // Shell variables Bash keeps for itself (UID, GROUPS, SHLVL...) come from varValue when loaded.
+      const get = (name) => this.env[name] ?? (this.dynVar ? this.dynVar(name) : undefined);
+      if ((m = rest.match(/^\{#(\w+)\}/))) return { value: String((get(m[1]) ?? "").length), end: i + 1 + m[0].length };
+      if ((m = rest.match(/^\{(\w+)\[(@|\*|\d+)\]\}/))) {
+        const arr = this.arrayVar ? this.arrayVar(m[1]) : null;
+        const list = arr || (get(m[1]) !== undefined ? [get(m[1])] : []);
+        return { value: /\d/.test(m[2]) ? list[+m[2]] ?? "" : list.join(" "), end: i + 1 + m[0].length };
+      }
+      if ((m = rest.match(/^\{(\w+)(:?)([-=+?])([^}]*)\}/))) {
+        const v = get(m[1]), unset = v === undefined || (m[2] && v === "");
+        const word = m[4].replace(/\$\{?(\w+)\}?/g, (x, n) => get(n) ?? "");
+        const end = i + 1 + m[0].length;
+        if (m[3] === "-") return { value: unset ? word : v, end };
+        if (m[3] === "=") { if (unset) this.env[m[1]] = word; return { value: unset ? word : v, end }; }
+        if (m[3] === "+") return { value: unset ? "" : word, end };
+        return { value: v ?? "", end };
+      }
+      if ((m = rest.match(/^\{(\w+)\}/))) return { value: get(m[1]) ?? "", end: i + 1 + m[0].length };
+      if ((m = rest.match(/^\w+/))) return { value: m[0] === "0" ? "bash" : get(m[0]) ?? "", end: i + 1 + m[0].length };
+      if (rest[0] === "-") return { value: this.dashFlags ? this.dashFlags() : "himBHs", end: i + 2 };
       if (rest[0] === "?") return { value: String(this.lastStatus), end: i + 2 };
       if (rest[0] === "$") return { value: String(this.shellPid ? this.shellPid() : 4242), end: i + 2 };
       if (rest[0] === "!") return { value: this.lastBgPid ? String(this.lastBgPid) : "", end: i + 2 };
@@ -1205,6 +1263,8 @@
   }
 
   LPIC.Shell = Shell;
+  // For the add-on command files: what counts as a builtin, a keyword or a program on disk.
+  Object.assign(Shell, { BUILTINS, KEYWORDS, EXTERNAL, ALSO_EXTERNAL, ALIASES, opts });
   LPIC.VFS = VFS;
   LPIC.shellUtil = { opts, pad, EXTERNAL };
 })();

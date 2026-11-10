@@ -250,6 +250,7 @@
     p.procs.delete(ctx.pid);
     p.ctxs = p.ctxs.filter((x) => x !== ctx);
     ctx.closed = true;
+    if (sh.onCtxClosed) sh.onCtxClosed(ctx); // restores the parent shell's variables
   }
 
   function refresh(sh) {
@@ -423,15 +424,18 @@
   }
   function runFile(sh, path, args, stdin, res, ctx, needX) {
     const abs = sh.abs(path), node = sh.vfs.get(abs);
+    const base = abs.split("/").pop();
+    // /bin/bash, /usr/bin/ls and friends are the simulated commands themselves.
+    if (/^\/(usr\/)?s?bin\/[^/]+$/.test(abs) && C[base]) return SH.exec.call(sh, [base, ...args], stdin, res, ctx);
     if (!node) return { stderr: `bash: ${path}: No such file or directory`, status: 127 };
     if (node.type === "dir") return { stderr: `bash: ${path}: Is a directory`, status: 126 };
     if (needX && !sh.vfs.can(node, "x")) return { stderr: `bash: ${path}: Permission denied`, status: 126 };
-    const base = abs.split("/").pop();
-    if (/^\/(usr\/)?s?bin\/[^/]+$/.test(abs) && C[base]) return execBase.call(sh, [base, ...args], stdin, res, ctx);
     const text = node.content || "";
     const prof = profile(text);
     if (prof) return spawn(sh, { args: `/bin/bash ${path}${args.length ? " " + args.join(" ") : ""}`, comm: base, rss: 3584, vsz: 9056, ...prof }, res);
-    // A plain script: run its lines in a child shell, so cd and variables don't leak out.
+    // A plain script runs in a child shell: it sees only exported variables, and cd and
+    // variables don't leak back out.
+    if (sh.runScriptText) return sh.runScriptText(text, args, res);
     const body = text.split("\n").filter((l) => l.trim() && !/^\s*#/.test(l))
       .join("\n").replace(/\b(do|then|else)\s*\n/g, "$1 ").replace(/\n/g, "; ");
     if (!body.trim()) return {};
@@ -445,6 +449,8 @@
     return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: sh.lastStatus };
   }
 
+  SH.runFile = function (path, args, stdin, res, ctx, needX) { return runFile(this, path, args, stdin, res, ctx, needX); };
+  SH.procCtx = function () { return this.proc ? this.proc.ctx : null; };
   const bashBase = C.bash;
   C.bash = C.sh = function (args, stdin, res, ctx = {}) {
     const p = P(this);
@@ -935,7 +941,7 @@
     }
     const curCtx = p.ctx;
     const me = actor(this);
-    const self = { pid: p.next++, ppid: curCtx.pid, user: me, tty: curCtx.tty, args: ["ps", ...args].join(" "), comm: "ps", state: "R", sys: false, ni: this._spawnNi ?? 0,
+    const self = { pid: this._execPid || p.next++, ppid: curCtx.pid, user: me, tty: curCtx.tty, args: ["ps", ...args].join(" "), comm: "ps", state: "R", sys: false, ni: this._spawnNi ?? 0,
       rss: 4224, vsz: 11136, start: now(p), cpu0: 0.004, acc: 0, pct: 0, runFrom: now(p), kind: "self", ctx: null, isFg: true };
     let list = [...p.procs.values(), self];
     if (pids.length || users.length || ttys.length || cmds.length) {
