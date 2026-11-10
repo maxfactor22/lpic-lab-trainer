@@ -1,8 +1,10 @@
 /* Section 6: Regular expressions and finding things (103.7, 104.7). From "LPIC - Section 6.docx"
    (its heading says "Section 5"; the app uses Section 6 and ~/lpic-section6-lab).
-   Lesson 6.7 adds the Filesystem Hierarchy Standard and find -size/-mtime/-exec, which the workbook leaves out. */
+   Lesson 6.7 adds the Filesystem Hierarchy Standard and find -size/-mtime/-exec, which the workbook leaves out.
+   Lesson 6.8 adds quantifiers, POSIX classes, grep -o/-i, and sed -n ranges, -E groups and -i.bak. */
 (function () {
   const WS = "~/lpic-section6-lab";
+  const INV = WS + "/configs/hosts-inventory.txt";
   const FILES = {
     [WS + "/logs/incident-bridge.log"]: "2026-08-26 09:01 INFO bridge opened for vpn latency incident\n2026-08-26 09:04 WARN packet loss detected from site-a01\n2026-08-26 09:07 ERROR vpn tunnel reset for user alex\n2026-08-26 09:09 INFO service restored after route refresh\n2026-08-26 09:11 WARN follow-up needed with network team\n",
     [WS + "/logs/auth-review.log"]: "root:x:0:0:root:/root:/bin/bash\ndeploy:x:1001:1001:Deployment User:/home/deploy:/bin/bash\nsvc-backup:x:998:998:Backup Service:/var/lib/backup:/usr/sbin/nologin\nshutdown:x:6:0:shutdown:/sbin:/sbin/shutdown\ntempuser:x:1005:1005:Temporary User:/home/tempuser:/bin/bash\n",
@@ -35,9 +37,9 @@
     overview: {
       paragraphs: [
         "These labs give you the task, not the command. Decide what evidence you need, run the command, and prove the answer. Each lesson's tasks spell out the hints if you get stuck.",
-        "On your VM, run the workbook's Lab Setup; the app calls the folder <code>~/lpic-section6-lab</code> instead of <code>lpic-section5-lab</code>. The practice terminal already has the files. Lesson 6.7 is added: the Filesystem Hierarchy Standard and <code>find -size</code>, <code>-mtime</code> and <code>-exec</code>.",
+        "On your VM, run the workbook's Lab Setup; the app calls the folder <code>~/lpic-section6-lab</code> instead of <code>lpic-section5-lab</code>. The practice terminal already has the files. Lesson 6.7 is added: the Filesystem Hierarchy Standard and <code>find -size</code>, <code>-mtime</code> and <code>-exec</code>. Lesson 6.8 is added too: regex quantifiers, character classes, and <code>sed -n</code>, <code>-E</code> and <code>-i.bak</code>.",
       ],
-      commands: ["grep", "grep -E", "grep -F", "grep -f file", "grep -c -n -v -l -w -o -r", "^ $ . * [ ] [^ ]", "+ ? | ( ) {n,m}", "sed", "sed '/^$/d'", "which", "type", "whereis", "locate", "updatedb", "find -name -iname", "find -type f d", "find -empty", "find -size", "find -mtime", "find -maxdepth", "find -exec {} \\;"],
+      commands: ["grep", "grep -E", "grep -F", "grep -f file", "grep -c -n -v -l -w -o -r", "^ $ . * [ ] [^ ]", "+ ? | ( ) {n,m}", "sed", "sed '/^$/d'", "sed -n '2,4p'", "sed -E groups \\1", "sed -i.bak", "[[:digit:]] [[:alpha:]]", "which", "type", "whereis", "locate", "updatedb", "find -name -iname", "find -type f d", "find -empty", "find -size", "find -mtime", "find -maxdepth", "find -exec {} \\;"],
       memoryHook: "<code>grep</code> finds text, <code>sed</code> changes it. <code>which</code> shows where a command runs from, <code>type</code> what kind it is, <code>whereis</code> its binary and manual. <code>locate</code> is fast but can be stale; <code>updatedb</code> refreshes it. <code>find</code> is slower but live and precise.",
     },
 
@@ -253,6 +255,47 @@
         completion: "You know where things live and can find them by any attribute.",
       },
 
+      /* ---------------------------------------------------------- 6.8 (added) */
+      {
+        id: "6.8", title: "Quantifiers, classes and sed in place", navSubtitle: ". * {n,m} [[:digit:]], sed -n -E -i (added)", objective: "103.7", difficulty: "Advanced",
+        source: "Added for exam objective 103.7",
+        summary: "Match any character, repeat with quantifiers, use POSIX character classes, pull out just the match, print line ranges with sed, rewrite fields with groups, and edit a file in place with a backup.",
+        ticket: ticket("Network engineer", "The host inventory needs an audit before a firewall change: find hosts by pattern, list every IP and the high ports, build a hosts-file view, and fix one port in the file itself, keeping a backup.", ["grep -i -o -E", "[[:digit:]]", "sed -n", "sed -E", "sed -i.bak"], {
+          callout: { kind: "info", title: "Quantifiers", text: "<code>.</code> any one character · <code>*</code> zero or more of the thing before · <code>+</code> one or more · <code>?</code> zero or one · <code>{n,m}</code> between n and m. In basic regex, write <code>\\+ \\? \\{n,m\\}</code>; with <code>grep -E</code> or <code>sed -E</code>, no backslashes." } }),
+        workspace: { ...base, files: { ...FILES, [INV]: "web01 10.10.1.21 port=443 owner=ops\nweb02 10.10.1.22 port=8443 owner=ops\ndb01 10.10.2.5 port=5432 owner=dba\napp02 10.10.3.101 port=80 owner=ops\nbackup-host 10.10.9.250 port=22 owner=storage\nWEB03 10.10.1.23 port=443 owner=ops\n" } },
+        tasks: [
+          { id: "look", title: "Look at the inventory", command: "cat configs/hosts-inventory.txt", detail: "Six hosts: name, IP, port and owner. On your VM, create this file with the same six lines.", check: { type: "all", checks: [pat("^(cat|less|more) configs/hosts-inventory\\.txt$")] } },
+          { id: "dot", title: "Any one character", command: "grep 'web0.' configs/hosts-inventory.txt", detail: "<code>.</code> matches exactly one character, so <code>web0.</code> finds web01 and web02. WEB03 doesn't match: regex is case-sensitive.", check: { type: "all", checks: [pat("^grep (-\\w+ )*['\"]?web0\\.['\"]? configs/hosts-inventory\\.txt$"), out("^web02 ")] } },
+          { id: "case", title: "Ignore case", command: "grep -i 'web0.' configs/hosts-inventory.txt", detail: "<code>-i</code> makes the match case-insensitive, so WEB03 shows up too.", check: { type: "all", checks: [pat("^grep (-\\w*i\\w* )"), out("^WEB03 ")] } },
+          { id: "class", title: "High ports with a character class", short: "Ports with 4 or more digits, saved to <code>reports/high-ports.txt</code>", detail: "<code>grep -E 'port=[[:digit:]]{4,}' configs/hosts-inventory.txt &gt; reports/high-ports.txt</code>. <code>[[:digit:]]</code> is the same as <code>[0-9]</code>; <code>{4,}</code> means four or more. Other classes: <code>[[:alpha:]]</code>, <code>[[:upper:]]</code>, <code>[[:space:]]</code>, <code>[[:alnum:]]</code>.", check: file("reports/high-ports.txt", "^web02 [\\s\\S]*^db01 ", "port=443 |port=80 |port=22 ") },
+          { id: "ips", title: "Only the IP addresses", short: "Save just the IPs, one per line, to <code>reports/ip-list.txt</code>", detail: "<code>grep -o -E '([0-9]{1,3}\\.){3}[0-9]{1,3}' configs/hosts-inventory.txt &gt; reports/ip-list.txt</code>. <code>-o</code> prints only the matched part. The dot is escaped (<code>\\.</code>) because a bare <code>.</code> would match any character.", check: file("reports/ip-list.txt", "^10\\.10\\.1\\.21\\n10\\.10\\.1\\.22\\n10\\.10\\.2\\.5\\n10\\.10\\.3\\.101\\n10\\.10\\.9\\.250\\n10\\.10\\.1\\.23\\n?$") },
+          { id: "range", title: "Print a range of lines", command: "sed -n '2,4p' configs/hosts-inventory.txt", detail: "<code>-n</code> turns off sed's automatic printing; <code>2,4p</code> prints lines 2 to 4. <code>$p</code> prints the last line, and <code>'/db/,$p'</code> prints from the first match to the end.", check: { type: "all", checks: [pat("^sed -n (-e )?['\"]?2,4p['\"]? "), out("^db01 ")] } },
+          { id: "groups", title: "Rewrite fields with groups", short: "Hosts-file view (IP, then name) in <code>reports/hosts-view.txt</code>", detail: "<code>sed -E 's/^([^ ]+) ([^ ]+) .*/\\2 \\1/' configs/hosts-inventory.txt &gt; reports/hosts-view.txt</code>. Each <code>( )</code> captures text; <code>\\1</code> and <code>\\2</code> put it back. Without <code>-E</code>, write the groups as <code>\\( \\)</code>.", check: file("reports/hosts-view.txt", "^10\\.10\\.1\\.21 web01$[\\s\\S]*^10\\.10\\.9\\.250 backup-host$", "port=") },
+          { id: "inplace", title: "Edit the file in place, with a backup", command: "sed -i.bak 's/port=80 /port=8080 /' configs/hosts-inventory.txt", detail: "<code>-i</code> writes the change back into the file. <code>-i.bak</code> first saves the original as <code>hosts-inventory.txt.bak</code>. The space after 80 stops it touching port=8443. Compare the two with <code>diff configs/hosts-inventory.txt.bak configs/hosts-inventory.txt</code>.", check: { type: "all", checks: [file("configs/hosts-inventory.txt", "^app02 .*port=8080 ", "port=80 |port=808443"), file("configs/hosts-inventory.txt.bak", "^app02 .*port=80 ")] } },
+        ],
+        quiz: [
+          { id: "star", prompt: "Which of these lines does the basic regex <code>ab*c</code> match?", answer: "ac", explain: "Correct. <code>*</code> means zero or more b's, so ac, abc and abbbc all match.",
+            options: [{ value: "ac", label: "<code>ac</code>" }, { value: "axc", label: "<code>axc</code>" }, { value: "abd", label: "<code>abd</code>" }] },
+          { id: "dotstar", prompt: "What does <code>.*</code> match?", answer: "any", explain: "Correct. Any character, any number of times, including none.",
+            options: [{ value: "any", label: "Any run of characters, including nothing" }, { value: "dot", label: "Dots only" }, { value: "one", label: "Exactly one character" }] },
+          { id: "brace", prompt: "Without <code>-E</code>, how do you write \"two or three digits\" for grep?", answer: "bre", explain: "Correct. Basic regex needs the backslashes; grep -E takes [0-9]{2,3}.",
+            options: [{ value: "bre", label: "<code>[0-9]\\{2,3\\}</code>" }, { value: "ere", label: "<code>[0-9]{2,3}</code>" }, { value: "paren", label: "<code>[0-9](2,3)</code>" }] },
+          { id: "ibak", prompt: "What does <code>sed -i.bak 's/a/b/' f.txt</code> leave behind?", answer: "both", explain: "Correct. f.txt has the change; f.txt.bak is the original.",
+            options: [{ value: "both", label: "f.txt changed, and f.txt.bak with the original" }, { value: "out", label: "Only screen output; f.txt is unchanged" }, { value: "bak", label: "f.txt.bak with the change; f.txt unchanged" }] },
+          { id: "classdigit", prompt: "Which character class is the same as <code>[0-9]</code>?", answer: "digit", explain: "Correct. Note the double brackets: the class goes inside a bracket expression.",
+            options: [{ value: "digit", label: "<code>[[:digit:]]</code>" }, { value: "num", label: "<code>[:num:]</code>" }, { value: "alnum", label: "<code>[[:alnum:]]</code>" }] },
+        ],
+        challenge: {
+          prompt: "Print only lines 2 through 4 of <code>configs/hosts-inventory.txt</code> with sed. Enter the command.",
+          examPrompt: "Use sed to print only lines 2 through 4 of <code>hosts.txt</code>. Enter the command.",
+          check: { accept: ["sed -n '2,4p' configs/hosts-inventory.txt", "sed -n 2,4p configs/hosts-inventory.txt", "sed -n \"2,4p\" configs/hosts-inventory.txt", "sed -n -e '2,4p' configs/hosts-inventory.txt", "sed -n '2,4p' hosts.txt", "sed -n 2,4p hosts.txt", "sed -n \"2,4p\" hosts.txt", "sed -n -e '2,4p' hosts.txt"] },
+          correct: "Correct. -n stops the automatic print, and 2,4p prints just that range.",
+          incorrect: "Use sed -n with the address range 2,4 and the p command.",
+        },
+        memoryHook: "<code>.</code> one of anything, <code>*</code> zero or more, <code>+</code> one or more, <code>?</code> maybe, <code>{n,m}</code> a count. <code>sed -n …p</code> = print only; <code>sed -i.bak</code> = edit the file, keep the original.",
+        completion: "You can write precise patterns and edit files safely with sed.",
+      },
+
       /* ---------------------------------------------------------- 6.C */
       {
         id: "6.C", navNumber: "C", title: "Challenge exam: evidence pack", navSubtitle: "No notes", objective: "103.7", difficulty: "Hard",
@@ -281,7 +324,9 @@
         "Quote patterns that contain shell characters such as `|`, `$`, `*` and `#`.",
         "`[46]` matches one character, a 4 or a 6, never the string 46.",
         "`-f` reads patterns from a file; `-F` treats patterns as fixed strings. `egrep` = `grep -E`, `fgrep` = `grep -F`.",
-        "`sed` writes to standard output; it doesn't change the file unless you use `-i`.",
+        "`sed` writes to standard output; it doesn't change the file unless you use `-i`. `-i.bak` keeps the original as a `.bak` file.",
+        "Character classes need double brackets: `[[:digit:]]`. A bare `[:digit:]` is a bracket list of the characters d, i, g, t and `:`.",
+        "`*` repeats the thing before it, zero or more times; `.*` means anything. A regex `*` is not a shell glob.",
         "`locate` uses a database that can be stale; `updatedb` refreshes it, and `/etc/updatedb.conf` controls what it skips.",
         "Start `find` close to where the file probably is, not at `/`.",
         "`which` and `type` overlap, but only `type` knows about aliases, builtins and keywords. `whereis` adds manual pages.",

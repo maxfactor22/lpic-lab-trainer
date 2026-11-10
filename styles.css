@@ -215,7 +215,7 @@ button { font: inherit; color: inherit; }
   padding-right: max(24px, env(safe-area-inset-right));
 }
 
-.lesson-content { display: grid; gap: 16px; min-width: 0; }
+.lesson-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 
 .card {
   background: var(--card);
@@ -406,7 +406,9 @@ a.lesson-link:hover { border-color: var(--line-strong); background: var(--card-2
 .tasks-panel { display: block; }
 .tasks-panel .section-heading { padding: 4px 2px 0; }
 
-.task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.task-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.task-detail, .task-detail > * { min-width: 0; }
+.task-detail code, .task code { white-space: normal; overflow-wrap: anywhere; }
 
 .task {
   border-radius: var(--radius-md);
@@ -1073,3 +1075,10 @@ label.button { cursor: pointer; }
 #exam-fill::placeholder, #drill-fill::placeholder { color: var(--faint); }
 #exam-fill:focus, #drill-fill:focus { outline: none; box-shadow: none; }
 #drill-fill:disabled { opacity: .85; }
+
+/* Phone width: let long lesson titles, commands and answer options wrap instead of widening the page. */
+.pager-nav { min-width: 0; max-width: 100%; }
+.pager-nav .button { max-width: 100%; min-width: 0; }
+.vm-step-body, .vm-step-body > * { min-width: 0; overflow-wrap: anywhere; }
+.question label code, .vm-step-body code { white-space: normal; overflow-wrap: anywhere; }
+.prose code, .ticket-body code, .ticket dd code, .callout code, .hero-copy code, .vm-step code, .paste-label code, .command-cloud code, dd code { white-space: normal; overflow-wrap: anywhere; }

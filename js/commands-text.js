@@ -338,13 +338,14 @@
     return cmds;
   }
   C.sed = function (args, stdin) {
-    let quiet = false, inPlace = false, extended = false;
+    let quiet = false, inPlace = false, extended = false, suffix = "";
     const scripts = [], files = [];
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
       if (a === "-e") { scripts.push(args[++i]); continue; }
       if (a === "-n" || a === "--quiet") { quiet = true; continue; }
-      if (a === "-i" || a.startsWith("-i")) { inPlace = true; continue; }
+      if (a === "-i" || a.startsWith("-i")) { inPlace = true; suffix = a.slice(2); continue; }
+      if (a.startsWith("--in-place")) { inPlace = true; suffix = a.split("=")[1] || ""; continue; }
       if (a === "-E" || a === "-r") { extended = true; continue; }
       if (/^-[nEr]+$/.test(a)) { if (a.includes("n")) quiet = true; if (/[Er]/.test(a)) extended = true; continue; }
       if (!scripts.length && !args.slice(0, i).includes("-e")) { scripts.push(a); continue; }
@@ -401,6 +402,7 @@
       for (const f of files) {
         const node = this.vfs.get(this.abs(f));
         if (!node || node.type !== "file") return { stderr: `sed: can't read ${f}: No such file or directory`, status: 2 };
+        if (suffix) this.vfs.write(this.abs(f) + suffix, node.content); // -i.bak keeps the original
         node.content = run(node.content);
         node.mtime = Date.now();
       }
