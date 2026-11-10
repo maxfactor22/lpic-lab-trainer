@@ -462,6 +462,129 @@
     }
     return baseGrep.call(this, cleaned, stdin, res);
   };
+  /* ------------------------------------------------------------- tee */
+  C.tee = function (args, stdin) {
+    const append = args.includes("-a") || args.includes("--append");
+    const files = args.filter((a) => a !== "-a" && a !== "--append");
+    for (const f of files) {
+      if (f === "/dev/null") continue;
+      try { this.vfs.write(this.abs(f), stdin, append); }
+      catch { return { stdout: stdin, stderr: `tee: ${f}: No such file or directory`, status: 1 }; }
+    }
+    return { stdout: stdin };
+  };
+
+  /* ------------------------------------------------------------- xargs */
+  C.xargs = function (args, stdin, res) {
+    let file = null, perCmd = null, replace = null, trace = false, nulSep = false, delim = null;
+    let i = 0;
+    for (; i < args.length; i++) {
+      const a = args[i];
+      if (a === "-a") { file = args[++i]; continue; }
+      if (a === "-n") { perCmd = parseInt(args[++i], 10); continue; }
+      if (/^-n\d+$/.test(a)) { perCmd = parseInt(a.slice(2), 10); continue; }
+      if (a === "-I") { replace = args[++i]; continue; }
+      if (a.startsWith("-I") && a.length > 2) { replace = a.slice(2); continue; }
+      if (a === "-t") { trace = true; continue; }
+      if (a === "-0" || a === "--null") { nulSep = true; continue; }
+      if (a === "-d") { delim = args[++i]; continue; }
+      if (a === "-p") return { stderr: "xargs: -p (prompt) isn't simulated here. Use rm -i instead.", status: 1 };
+      break;
+    }
+    const cmd = args.slice(i);
+    if (!cmd.length) cmd.push("echo");
+    let text = stdin;
+    if (file) {
+      const n = this.vfs.get(this.abs(file));
+      if (!n || n.type !== "file") return { stderr: `xargs: ${file}: No such file or directory`, status: 1 };
+      text = n.content;
+    }
+    let items;
+    if (nulSep) items = text.split("\0").filter(Boolean);
+    else if (delim) items = text.split(delim.replace("\\n", "\n")).filter(Boolean);
+    else if (replace) items = text.split("\n").filter((l) => l.trim());
+    else items = (text.match(/'[^']*'|"[^"]*"|\S+/g) || []).map((w) => w.replace(/^(['"])(.*)\1$/, "$2"));
+    const groups = [];
+    if (replace) items.forEach((it) => groups.push(cmd.map((w) => w.split(replace).join(it))));
+    else if (perCmd) for (let k = 0; k < items.length; k += perCmd) groups.push([...cmd, ...items.slice(k, k + perCmd)]);
+    else groups.push([...cmd, ...items]);
+    let out = "", err = "", status = 0;
+    for (const g of groups) {
+      if (trace) err += g.join(" ") + "\n";
+      // Commands run by xargs read from xargs's own input, not the keyboard,
+      // unless the list came from -a. rm -i notices this.
+      const r = this.exec(g, "", res, { fromXargsStdin: !file });
+      out += r.stdout || "";
+      if (r.stderr) err += r.stderr.replace(/\n?$/, "\n");
+      if (r.status) status = 123;
+    }
+    return { stdout: out, stderr: err.replace(/\n$/, ""), status };
+  };
+
+  /* ------------------------------------------------------------- rm -i (interactive) */
+  const baseRm = C.rm;
+  C.rm = function (args, stdin, res, ctx = {}) {
+    const flags = args.filter((a) => /^-[a-zA-Z]+$/.test(a)).join("");
+    if (!flags.includes("i") || flags.includes("f")) return baseRm.call(this, args.map((a) => (/^-[a-zA-Z]+$/.test(a) ? a.replace("i", "") : a)).filter((a) => a !== "-"), stdin, res);
+    const files = args.filter((a) => !/^-[a-zA-Z]+$/.test(a));
+    const out = [], err = [];
+    for (const f of files) {
+      const node = this.vfs.get(this.abs(f));
+      if (!node) { err.push(`rm: cannot remove '${f}': No such file or directory`); continue; }
+      const kind = node.type === "dir" ? "directory" : node.content ? "regular file" : "regular empty file";
+      const q = `rm: remove ${kind} '${f}'?`;
+      let yes;
+      if (ctx.fromXargsStdin) { yes = false; err.push(`${q} (no answer: xargs gave rm no keyboard, so nothing was removed. Use xargs -a FILE so rm can ask you.)`); continue; }
+      yes = window.confirm(q);
+      out.push(`${q} ${yes ? "y" : "n"}`);
+      if (yes) {
+        if (node.type === "dir" && !/[rR]/.test(flags)) { err.push(`rm: cannot remove '${f}': Is a directory`); continue; }
+        this.vfs.remove(this.abs(f));
+      }
+    }
+    return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 1 : 0 };
+  };
+
+  /* ------------------------------------------------------------- printf (format reuse, %s %d %%) */
+  C.printf = function (args) {
+    if (!args.length) return { stderr: "printf: usage: printf [-v var] format [arguments]", status: 2 };
+    const [fmt, ...rest] = args;
+    const esc = (s) => s.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\\\/g, "\\");
+    const once = (vals) => {
+      let k = 0;
+      const s = esc(fmt).replace(/%(-?\d*)([sdf%])/g, (m, w, t) => {
+        if (t === "%") return "%";
+        let v = vals[k++] ?? (t === "s" ? "" : "0");
+        if (t === "d") v = String(parseInt(v, 10) || 0);
+        if (t === "f") v = (parseFloat(v) || 0).toFixed(6);
+        const width = parseInt(w, 10);
+        return width ? (width < 0 ? v.padEnd(-width) : v.padStart(width)) : v;
+      });
+      return { s, used: k };
+    };
+    let out = "", vals = rest;
+    do {
+      const { s, used } = once(vals);
+      out += s;
+      if (!used) break;
+      vals = vals.slice(used);
+    } while (vals.length);
+    return { stdout: out };
+  };
+
+  /* ------------------------------------------------------------- date +FORMAT */
+  const baseDate = C.date;
+  C.date = function (args) {
+    const f = args.find((a) => a.startsWith("+"));
+    if (!f) return baseDate.call(this, args);
+    const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
+    const map = { Y: d.getFullYear(), m: p2(d.getMonth() + 1), d: p2(d.getDate()), H: p2(d.getHours()), M: p2(d.getMinutes()), S: p2(d.getSeconds()),
+      F: `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`, T: `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`,
+      s: Math.floor(d / 1000), A: d.toLocaleDateString("en-US", { weekday: "long" }), a: d.toLocaleDateString("en-US", { weekday: "short" }),
+      B: d.toLocaleDateString("en-US", { month: "long" }), b: d.toLocaleDateString("en-US", { month: "short" }), j: String(Math.ceil((d - new Date(d.getFullYear(), 0, 1)) / 864e5) + 0).padStart(3, "0"), "%": "%" };
+    return { stdout: f.slice(1).replace(/%(.)/g, (m, c) => (map[c] !== undefined ? map[c] : m)) + "\n" };
+  };
+
   C.egrep = function (args, stdin, res) { return C.grep.call(this, ["-E", ...args], stdin, res); };
   C.fgrep = function (args, stdin, res) { return C.grep.call(this, ["-F", ...args], stdin, res); };
 })();

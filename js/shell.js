@@ -137,6 +137,7 @@
       ["/etc", "/usr/bin", "/usr/sbin", "/usr/share", "/var/log", "/tmp", "/dev", "/proc", "/boot", "/opt", "/srv", "/root"]
         .forEach((d) => this.vfs.mkdirp(d));
       this.vfs.write("/etc/hostname", this.host + "\n");
+      this.vfs.write("/dev/null", "");
       this.vfs.write("/etc/os-release", 'NAME="Linux Mint"\nVERSION="22 (Wilma)"\nID=linuxmint\nID_LIKE="ubuntu debian"\n');
       this.vfs.write("/etc/shells", "/bin/sh\n/bin/bash\n/usr/bin/bash\n/bin/dash\n");
       this.vfs.write("/etc/passwd", PASSWD.replace(/\bmax\b/g, this.user));
@@ -177,6 +178,35 @@
       if (hx.changed) { line = hx.line; res.out.push({ text: line, cls: "terminal-muted" }); res.events.push({ type: "history-expand", from: raw.trim(), to: line.trim() }); }
       res.expanded = line.trim();
       if (!/^\s/.test(raw)) this.history.push(line.trim());
+
+      // Here-documents: the engine collects the lines up to the delimiter, so a line can arrive
+      // as "cmd <<EOF\nbody...\nEOF". Each body becomes a hidden temp file read with <.
+      // Here-strings (<<< word) become a temp file with that word and a newline.
+      if (line.includes("\n")) {
+        const [first, ...rest] = line.split("\n");
+        let cmdLine = first, n = 0;
+        const docs = [];
+        cmdLine = cmdLine.replace(/<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/g, (m, dash, q, word) => { docs.push({ word, quoted: !!q, dash: !!dash }); return `< /tmp/.heredoc-${docs.length}`; });
+        for (const d of docs) {
+          const body = [];
+          while (rest.length) {
+            let l = rest.shift();
+            if (d.dash) l = l.replace(/^\t+/, "");
+            if (l.trim() === d.word) break;
+            body.push(l);
+          }
+          let text = body.join("\n") + (body.length ? "\n" : "");
+          if (!d.quoted) text = text.replace(/\$\(([^)]*)\)|`([^`]*)`|\$\{(\w+)\}|\$(\w+)/g, (m, c1, c2, v1, v2) => (c1 !== undefined || c2 !== undefined ? this.runCapture(c1 ?? c2).replace(/\n+$/, "") : this.env[v1 || v2] ?? ""));
+          this.vfs.write(`/tmp/.heredoc-${++n}`, text);
+        }
+        line = cmdLine;
+      }
+      line = line.replace(/<<<\s*('([^']*)'|"([^"]*)"|(\S+))/g, (m, all, a, b, c) => {
+        const id = `/tmp/.herestring-${Math.random().toString(36).slice(2, 8)}`;
+        const raw = a ?? b ?? c;
+        this.vfs.write(id, (a !== undefined ? raw : raw.replace(/\$\{?(\w+)\}?/g, (x, v) => this.env[v] ?? "")) + "\n");
+        return `< ${id}`;
+      });
 
       let tokens;
       try { tokens = this.tokenize(line); }
@@ -235,12 +265,17 @@
       let i = 0, word = null;
       const start = () => { if (!word) word = { word: "", glob: false, brace: false, quoted: false }; };
       const push = () => { if (word) { tokens.push(word); word = null; } };
-      const ops = ["&>", "2>>", "2>&1", "2>", ">>", "&&", "||", ">", "<", "|", ";"];
+      const ops = ["&>>", "&>", "2>>", "2>&1", "2>", "1>&2", "1>>", "1>", ">&2", ">>", "&&", "||", ">", "<", "|", ";"];
       while (i < line.length) {
         const c = line[i];
         if (/\s/.test(c)) { push(); i++; continue; }
         if (c === "#" && !word) break;
-        const op = ops.find((o) => line.startsWith(o, i) && (o !== "2>" && o !== "2>>" && o !== "2>&1" || !word));
+        const op = ops.find((o) => line.startsWith(o, i) && (!/^[12]/.test(o) || !word));
+        if (c === "`") { // backtick command substitution
+          const j = line.indexOf("`", i + 1);
+          if (j < 0) throw new Error("unexpected EOF while looking for matching ``'");
+          start(); word.word += this.runCapture(line.slice(i + 1, j)).replace(/\n+$/, ""); i = j + 1; continue;
+        }
         if (op) { push(); tokens.push({ op }); i += op.length; continue; }
         start();
         if (c === "'") {
@@ -253,6 +288,7 @@
           while (i < line.length && line[i] !== '"') {
             if (line[i] === "\\" && /["\\$`]/.test(line[i + 1] || "")) { word.word += line[i + 1]; i += 2; continue; }
             if (line[i] === "$") { const r = this.dollar(line, i); word.word += r.value; i = r.end; continue; }
+            if (line[i] === "`") { const j = line.indexOf("`", i + 1); if (j > i) { word.word += this.runCapture(line.slice(i + 1, j)).replace(/\n+$/, ""); i = j + 1; continue; } }
             word.word += line[i++];
           }
           if (line[i] !== '"') throw new Error("unexpected EOF while looking for matching `\"'");
@@ -336,7 +372,7 @@
         for (let k = 0; k < st.length; k++) {
           const t = st[k];
           if (t.op) {
-            if (t.op === "2>&1") { redirs.push({ op: "2>&1" }); continue; }
+            if (t.op === "2>&1" || t.op === "1>&2" || t.op === ">&2") { redirs.push({ op: t.op }); continue; }
             const target = st[k + 1];
             if (!target || target.op) { res.out.push({ text: "bash: syntax error near unexpected token `newline'", cls: "terminal-error" }); this.lastStatus = 2; return { stdout: "" }; }
             redirs.push({ op: t.op, target: target.word }); k++; continue;
@@ -352,20 +388,45 @@
           if (!node || node.type !== "file") { res.out.push({ text: `bash: ${inR.target}: No such file or directory`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" }; }
           stdin = node.content;
         }
-        const r = this.exec(words, stdin, res);
-        let out = r.stdout || "", err = r.stderr || "";
+        /* Work out where file descriptors 1 (stdout) and 2 (stderr) point, left to right,
+           as Bash does. So "> f 2>&1" sends both to f, but "2>&1 > f" leaves errors on screen.
+           Files named by > are created (or emptied) even if the command fails. */
+        const STD = { kind: "std" }, TERM = { kind: "term" };
+        let fd1 = STD, fd2 = TERM;
+        const files = new Map();
+        const fileDest = (target, append) => {
+          const abs = this.abs(target);
+          if (!files.has(abs)) files.set(abs, { kind: "file", abs, target, append, data: "" });
+          return files.get(abs);
+        };
         for (const rd of redirs) {
-          if (rd.op === "2>&1") { out += err; err = ""; continue; }
           if (rd.op === "<") continue;
-          const devnull = rd.target === "/dev/null";
-          try {
-            if (rd.op === ">" || rd.op === ">>") { if (!devnull) this.vfs.write(this.abs(rd.target), out, rd.op === ">>"); out = ""; }
-            else if (rd.op === "2>" || rd.op === "2>>") { if (!devnull) this.vfs.write(this.abs(rd.target), err, rd.op === "2>>"); err = ""; }
-            else if (rd.op === "&>") { if (!devnull) this.vfs.write(this.abs(rd.target), out + err); out = ""; err = ""; }
-            res.events.push({ type: "file-written", path: this.abs(rd.target) });
-          } catch (e) {
-            res.out.push({ text: `bash: ${rd.target}: ${e.message}`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" };
-          }
+          if (rd.op === "2>&1") fd2 = fd1;
+          else if (rd.op === "1>&2" || rd.op === ">&2") fd1 = fd2;
+          else if (rd.op === ">" || rd.op === "1>" || rd.op === ">>" || rd.op === "1>>") fd1 = fileDest(rd.target, rd.op.endsWith(">>"));
+          else if (rd.op === "2>" || rd.op === "2>>") fd2 = fileDest(rd.target, rd.op === "2>>");
+          else if (rd.op === "&>" || rd.op === "&>>") { fd1 = fd2 = fileDest(rd.target, rd.op === "&>>"); }
+        }
+        // Truncate files before the command runs, so "sort f > f" empties f like the real shell.
+        for (const f of files.values()) {
+          if (f.target === "/dev/null") continue;
+          try { if (!f.append) this.vfs.write(f.abs, ""); else if (!this.vfs.get(f.abs)) this.vfs.write(f.abs, ""); }
+          catch (e) { res.out.push({ text: `bash: ${f.target}: ${e.message}`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" }; }
+        }
+        const r = this.exec(words, stdin, res, { tty: s === stages.length - 1 && fd1 === STD });
+        let out = "", err = "";
+        const send = (dest, text, isErr) => {
+          if (!text) return;
+          if (dest.kind === "std") out += text;
+          else if (dest.kind === "term") err += text;
+          else dest.data += text;
+          if (isErr && dest.kind === "std") res.events.push({ type: "stderr-to-stdout" });
+        };
+        send(fd1, r.stdout || "", false);
+        send(fd2, r.stderr ? r.stderr.replace(/\n?$/, "\n") : "", true);
+        for (const f of files.values()) {
+          if (f.target !== "/dev/null") this.vfs.write(f.abs, f.data, true);
+          res.events.push({ type: "file-written", path: f.abs });
         }
         if (err) res.out.push(...err.replace(/\n$/, "").split("\n").map((text) => ({ text, cls: "terminal-error" })));
         this.lastStatus = r.status || 0;
@@ -376,7 +437,7 @@
     }
 
     /* --------------------------------------------------------- commands */
-    exec(argv, stdin, res) {
+    exec(argv, stdin, res, ctx = {}) {
       if (!argv.length) return { status: 0 };
       let [name, ...args] = argv;
       // Variable assignment: NAME=value
@@ -397,7 +458,7 @@
       if (fn) {
         if (EXTERNAL[name] && !BUILTINS.has(name)) this.hashed.add(name);
         res.events.push({ type: "command", name, args });
-        try { return fn.call(this, args, stdin, res) || {}; }
+        try { return fn.call(this, args, stdin, res, ctx) || {}; }
         catch (e) { return { stderr: `${name}: ${e.message}`, status: 1 }; }
       }
       if (this.unsupported && name === this.unsupported.prefix) {
@@ -446,10 +507,10 @@
       return args[0] === "-" ? { stdout: abs + "\n" } : {};
     },
 
-    ls(args) {
+    ls(args, stdin, res, ctx = {}) {
       const o = opts(args.filter((a) => !a.startsWith("--color")));
       const all = o.flags.has("a"), almost = o.flags.has("A"), long = o.flags.has("l"), dirOnly = o.flags.has("d");
-      const one = o.flags.has("1"), recursive = o.flags.has("R"), classify = o.flags.has("F");
+      const one = o.flags.has("1") || ctx.tty === false, recursive = o.flags.has("R"), classify = o.flags.has("F");
       const targets = o.rest.length ? o.rest : ["."];
       const out = [], err = [];
       const fmt = (name, node) => {

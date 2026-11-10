@@ -404,8 +404,32 @@
     };
     current.stopFollow = stopFollow;
 
+    /* Here-documents: "cmd <<EOF" waits for more lines at a "> " prompt until the
+       delimiter line, then runs the whole thing as one command. */
+    let heredoc = null;
     const run = (raw) => {
+      if (heredoc) {
+        line("> " + raw, "terminal-command");
+        heredoc.lines.push(raw);
+        if ((heredoc.dash ? raw.replace(/^\t+/, "") : raw).trim() === heredoc.word) {
+          const full = heredoc.lines.join("\n");
+          heredoc = null;
+          updatePrompt();
+          return runFull(full, true);
+        }
+        return;
+      }
       if (!raw.trim()) return;
+      const hd = !follow && raw.match(/<<(-?)\s*['"]?([A-Za-z_]\w*)['"]?/);
+      if (hd && !/<<</.test(raw)) {
+        line(`${shell.prompt()} ${raw}`, "terminal-command");
+        heredoc = { word: hd[2], dash: !!hd[1], lines: [raw] };
+        $("#terminal-prompt").textContent = ">";
+        return;
+      }
+      return runFull(raw, false);
+    };
+    const runFull = (raw, echoed) => {
       if (follow) {
         line(`[second terminal] ${shell.prompt()} ${raw}`, "terminal-muted");
         const res = shell.run(raw);
@@ -419,7 +443,7 @@
         grade({ res, shell });
         return;
       }
-      line(`${shell.prompt()} ${raw}`, "terminal-command");
+      if (!echoed) line(`${shell.prompt()} ${raw}`, "terminal-command");
       const res = shell.run(raw);
       if (res.clear) { out.replaceChildren(); }
       res.out.forEach((o) => line(o.text, o.cls));
@@ -454,11 +478,12 @@
       if (e.key === "ArrowDown") { e.preventDefault(); recallMove(1); }
       if (e.key === "l" && e.ctrlKey) { e.preventDefault(); out.replaceChildren(); }
       if (e.key === "c" && e.ctrlKey && follow && input.selectionStart === input.selectionEnd) { e.preventDefault(); stopFollow(); }
+      if (e.key === "c" && e.ctrlKey && heredoc && input.selectionStart === input.selectionEnd) { e.preventDefault(); heredoc = null; line("^C", "terminal-command"); updatePrompt(); }
     });
     $$(".key-row button").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
     $$(".key-row button").forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.key;
-      if (k === "ctrl-c") return stopFollow();
+      if (k === "ctrl-c") { if (heredoc) { heredoc = null; line("^C", "terminal-command"); updatePrompt(); return; } return stopFollow(); }
       if (k === "up") return recallMove(-1);
       if (k === "down") return recallMove(1);
       const pos = input.selectionStart ?? input.value.length;
