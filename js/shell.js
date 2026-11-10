@@ -946,4 +946,5 @@
 
   LPIC.Shell = Shell;
   LPIC.VFS = VFS;
+  LPIC.shellUtil = { opts, pad, EXTERNAL };
 })();

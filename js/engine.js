@@ -507,6 +507,7 @@
         const node = shell.vfs.get(shell.abs(check.path));
         if (check.exists === false) return !node;
         if (!node || node.type !== "file") return false;
+        if (check.not && new RegExp(check.not, "im").test(node.content)) return false;
         return !check.re || new RegExp(check.re, "im").test(node.content);
       }
       case "history": return (check.includes || []).every((h) => shell.history.some((x) => new RegExp(h).test(norm(x))));
