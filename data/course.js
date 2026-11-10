@@ -9,6 +9,6 @@ LPIC.course({
     "103.1": 4, "103.2": 2, "103.3": 4, "103.4": 4, "103.5": 4, "103.6": 2, "103.7": 3, "103.8": 3,
     "104.1": 2, "104.2": 2, "104.3": 3, "104.5": 3, "104.6": 2, "104.7": 2,
   },
-  sections: ["section-02", "section-03", "section-04", "section-05", "section-06", "section-07", "section-13", "section-14", "section-15", "section-16",
+  sections: ["section-02", "section-03", "section-04", "section-05", "section-06", "section-07", "section-08", "section-13", "section-14", "section-15", "section-16",
              "section-17", "section-18", "section-19", "section-20", "section-21", "section-22", "section-23"],
 });

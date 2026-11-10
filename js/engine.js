@@ -381,6 +381,8 @@
     // locate's database is a snapshot taken now; lateFiles appear after it, like files created
     // since the last nightly updatedb run.
     if (LPIC.locateSnapshot) shell.locateDb = LPIC.locateSnapshot(shell);
+    // Setup commands run quietly before the lesson starts (a leading space keeps them out of history).
+    for (const c of ws.setup || []) shell.run(" " + c);
     for (const [p, c] of Object.entries(ws.lateFiles || {})) {
       const abs = shell.abs(p);
       shell.vfs.mkdirp(abs.replace(/\/[^/]*$/, ""));

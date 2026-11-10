@@ -203,9 +203,87 @@
     return { stdout: joinLines(out), stderr: err.join("\n"), status: err.length ? 1 : 0 };
   };
 
+  /* ------------------------------------------------------------- ls
+     Long format laid out like GNU ls: link, owner, group and size columns sized to fit,
+     -h human sizes (K/M/G, rounded up, one decimal below 10), "total" in 1K blocks,
+     and the year instead of the time for files older than about six months. */
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const humanSize = (n) => {
+    if (n < 1024) return String(n);
+    const u = ["K", "M", "G", "T"];
+    let v = n, i = -1;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return v < 10 ? (Math.ceil(v * 10) / 10).toFixed(1) + u[i] : Math.ceil(v) + u[i];
+  };
+  const lsDate = (ms) => {
+    const d = new Date(ms);
+    const old = Date.now() - ms > 182 * 864e5 || ms - Date.now() > 3600e3;
+    return `${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2)} ${old ? String(d.getFullYear()).padStart(5) : `${p2(d.getHours())}:${p2(d.getMinutes())}`}`;
+  };
+  const sizeOfNode = (n) => (n.type === "dir" ? 4096 : new TextEncoder().encode(n.content || "").length);
+  const blocksOf = (n) => (n.type === "dir" ? 4 : Math.ceil(sizeOfNode(n) / 4096) * 4);
+  C.ls = function (args, stdin, res, ctx = {}) {
+    const flags = new Set(), targets = [];
+    for (const a of args) {
+      if (a.startsWith("--color")) continue;
+      if (a === "--all") flags.add("a"); else if (a === "--almost-all") flags.add("A"); else if (a === "--human-readable") flags.add("h");
+      else if (a === "--recursive") flags.add("R"); else if (a === "--directory") flags.add("d"); else if (a === "--classify") flags.add("F");
+      else if (/^-[a-zA-Z1]+$/.test(a)) for (const ch of a.slice(1)) flags.add(ch);
+      else targets.push(a);
+    }
+    const long = flags.has("l"), human = flags.has("h"), all = flags.has("a"), almost = flags.has("A");
+    const one = flags.has("1") || ctx.tty === false || this.batch;
+    const classify = flags.has("F") || flags.has("p");
+    const byTime = flags.has("t"), bySize = flags.has("S"), reverse = flags.has("r"), inode = flags.has("i");
+    if (!targets.length) targets.push(".");
+    const err = [], out = [];
+    const suffix = (n) => (classify && n.type === "dir" ? "/" : flags.has("F") && n.mode && /x/.test(n.mode) && n.type !== "dir" ? "*" : "");
+    const longRows = (items) => {
+      const rows = items.map(([name, n]) => ({ name: name + suffix(n), mode: n.mode || (n.type === "dir" ? "drwxr-xr-x" : "-rw-r--r--"), links: String(n.type === "dir" ? 2 + Object.values(n.children).filter((c) => c.type === "dir").length : 1),
+        size: human ? humanSize(sizeOfNode(n)) : String(sizeOfNode(n)), date: lsDate(n.mtime), ino: String(n.inode || (n.inode = 1310000 + Math.floor(Math.random() * 9000))) }));
+      const w = (k) => Math.max(...rows.map((r) => r[k].length));
+      const [wl, ws, wi] = [w("links"), w("size"), w("ino")];
+      return rows.map((r) => `${inode ? r.ino.padStart(wi) + " " : ""}${r.mode} ${r.links.padStart(wl)} ${this.user} ${this.user} ${r.size.padStart(ws)} ${r.date} ${r.name}`);
+    };
+    const order = (items) => {
+      items.sort((a, b) => (byTime ? b[1].mtime - a[1].mtime : bySize ? sizeOfNode(b[1]) - sizeOfNode(a[1]) : 0) || a[0].replace(/^\./, "").localeCompare(b[0].replace(/^\./, ""), "en"));
+      if (reverse) items.reverse();
+      return items;
+    };
+    const short = (items) => (one ? items.map(([nm, n]) => (inode ? (n.inode || "") + " " : "") + nm + suffix(n)) : items.length ? [items.map(([nm, n]) => nm + suffix(n)).join("  ")] : []);
+    const fileItems = [], dirs = [];
+    for (const t of targets) {
+      const n = this.vfs.get(this.abs(t));
+      if (!n) { err.push(`ls: cannot access '${t}': No such file or directory`); continue; }
+      if (n.type === "file" || flags.has("d")) fileItems.push([t, n]); else dirs.push([t, n]);
+    }
+    if (fileItems.length) out.push(...(long ? longRows(order(fileItems)) : short(order(fileItems))));
+    const multi = targets.length > 1 || flags.has("R");
+    const walk = (t, n, first) => {
+      if (multi) { if (out.length || !first) out.push(""); out.push(`${t}:`); }
+      let items = Object.entries(n.children);
+      if (!all && !almost) items = items.filter(([k]) => !k.startsWith("."));
+      items = order(items);
+      if (all) items.unshift([".", n], ["..", n]);
+      if (long) {
+        const total = items.reduce((s, [, c]) => s + blocksOf(c), 0);
+        out.push(`total ${human ? humanSize(total * 1024) : total}`);
+        if (items.length) out.push(...longRows(items));
+      } else out.push(...short(items));
+      if (flags.has("R")) Object.keys(n.children).sort((a, b) => a.localeCompare(b, "en")).forEach((k) => {
+        const c = n.children[k];
+        if (c.type === "dir" && (all || almost || !k.startsWith("."))) walk(`${t.replace(/\/$/, "")}/${k}`, c, false);
+      });
+    };
+    dirs.sort((a, b) => a[0].localeCompare(b[0], "en")).forEach(([t, n], i) => walk(t, n, i === 0 && !fileItems.length));
+    return { stdout: joinLines(out), stderr: err.join("\n"), status: err.length ? 2 : 0 };
+  };
+
   /* ------------------------------------------------------------- file */
   function describe(n) {
     if (n.type === "dir") return "directory";
+    const archive = LPIC.archiveDescribe && LPIC.archiveDescribe(n);
+    if (archive) return archive;
     const t = n.content || "";
     if (!t.length) return "empty";
     if (t.startsWith("\x1f\x8b")) return "gzip compressed data";
