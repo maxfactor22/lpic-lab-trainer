@@ -170,6 +170,9 @@
       ${(o.paragraphs || []).length ? `<section class="card prose">${o.paragraphs.map((p) => `<p>${p}</p>`).join("")}</section>` : ""}
       ${o.setup ? `<section class="card"><div class="section-heading"><div><p class="eyebrow">Before you start</p><h2>Lab setup</h2></div></div>${stepsHtml(o.setup, null)}</section>` : ""}
       ${o.commands ? `<section class="card"><div class="section-heading"><div><p class="eyebrow">Know these cold</p><h2>Commands to memorize</h2></div></div><p class="command-cloud">${o.commands.map((c) => `<code>${esc(c)}</code>`).join(" ")}</p></section>` : ""}
+      ${(o.reference || []).map((r) => `<section class="card prose"><div class="section-heading"><div><p class="eyebrow">Reference</p><h2>${esc(r.title)}</h2></div></div>
+        ${r.paragraphs.map((p) => `<p>${inlineCode(p)}</p>`).join("")}
+        ${r.bullets.length ? `<ul class="trap-list">${r.bullets.map((b) => `<li>${inlineCode(b)}</li>`).join("")}</ul>` : ""}</section>`).join("")}
       ${o.memoryHook ? `<aside class="memory-card callout-hint wide"><span class="memory-icon" aria-hidden="true">★</span><strong>Memory hook</strong><p>${o.memoryHook}</p></aside>` : ""}
       <section class="card"><div class="section-heading"><div><p class="eyebrow">Lessons</p><h2>Work through these in order</h2></div></div>
         <ol class="lesson-cards">${section.lessons.map((l) => `

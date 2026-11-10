@@ -120,7 +120,8 @@ LPIC.section({
    "findmnt --verify",
    "losetup -fP --show and losetup -d"
   ],
-  "memoryHook": "Remember the order with T-P-F-M: Table, Partition, Filesystem, Mount. First the disk gets a partition table (MBR or GPT). Then you cut partitions with fdisk, gdisk or parted. Then mkfs or mkswap puts a filesystem or swap signature in a partition. Finally mount, swapon or /etc/fstab makes it usable. Every request in this section is one or more of those four steps, and lsblk -f shows you which step a device has reached."
+  "memoryHook": "Remember the order with T-P-F-M: Table, Partition, Filesystem, Mount. First the disk gets a partition table (MBR or GPT). Then you cut partitions with fdisk, gdisk or parted. Then mkfs or mkswap puts a filesystem or swap signature in a partition. Finally mount, swapon or /etc/fstab makes it usable. Every request in this section is one or more of those four steps, and lsblk -f shows you which step a device has reached.",
+  "reference": []
  },
  "lessons": [
   {

@@ -96,7 +96,8 @@ LPIC.section({
    "/dev/disk/by-id",
    "/media and D-Bus"
   ],
-  "memoryHook": "Follow the chain from hardware to you. The hardware sits on a bus, which lspci and lsusb show. The kernel talks to it through a driver module, which lsmod, modinfo and modprobe manage. The kernel announces what it found in dmesg and publishes the details in /sys. udev reads those details and creates the device file in /dev, and you and your programs only ever talk to that file. When something is missing, walk the chain in that order: bus, module, kernel message, /sys, /dev."
+  "memoryHook": "Follow the chain from hardware to you. The hardware sits on a bus, which lspci and lsusb show. The kernel talks to it through a driver module, which lsmod, modinfo and modprobe manage. The kernel announces what it found in dmesg and publishes the details in /sys. udev reads those details and creates the device file in /dev, and you and your programs only ever talk to that file. When something is missing, walk the chain in that order: bus, module, kernel message, /sys, /dev.",
+  "reference": []
  },
  "lessons": [
   {

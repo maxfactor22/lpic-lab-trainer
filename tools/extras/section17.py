@@ -1,0 +1,176 @@
+# App-only additions for Section 17: paste checks, one or two quiz questions per lab,
+# a trap quiz, and model answers for the practical questions.
+NUMBER = 17
+TITLE = "Boot Process and Boot Logs"
+OBJECTIVES = ["101.2"]
+SOURCE = "LPIC_Section17_Lab_Workbook.docx"
+WORKDIR = "~/lpic1-section17"
+
+def chk(re, say, **kw):
+    return {"re": re, "say": say, **kw}
+
+def q(id, prompt, answer, options, explain):
+    return {"id": id, "prompt": prompt, "answer": answer, "options": options, "explain": explain}
+
+LABS = {
+    1: dict(level="Beginner", nav="/sys/firmware/efi, efibootmgr",
+        paste={"command": "cat reports/firmware.txt", "checks": [
+            chk(r"^Firmware: (UEFI|BIOS)", "the first line names the firmware type"),
+            chk(r"^efivars\s*$|/sys/firmware/efi.*No such file or directory", "includes the ls of /sys/firmware/efi"),
+            chk(r"^BootOrder:|EFI variables are not supported|efibootmgr: (command )?not found", "includes what efibootmgr reported")]},
+        quiz=[q("efidir", "Which check proves a running system was started by UEFI?", "sys",
+                [{"value": "sys", "label": "<code>/sys/firmware/efi</code> exists"}, {"value": "boot", "label": "<code>/boot/grub</code> exists"}, {"value": "gpt", "label": "The disk has a GPT label"}],
+                "Correct. The kernel creates that directory only on a UEFI boot."),
+              q("efibm", "Which <code>efibootmgr</code> use is safe on this VM?", "read",
+                [{"value": "read", "label": "Running it with no options"}, {"value": "o", "label": "<code>efibootmgr -o</code> to fix the order"}, {"value": "c", "label": "<code>efibootmgr -c</code> to add an entry"}],
+                "Correct. With no options it only reads the firmware entries.")]),
+    2: dict(level="Beginner", nav="fdisk -l, ESP",
+        paste={"command": "cat reports/disk-layout.txt", "checks": [
+            chk(r"Disklabel type: (dos|gpt)", "fdisk shows the disk label type"),
+            chk(r"^Device\s+(Boot\s+)?Start\s+End\s+Sectors", "fdisk lists the partitions"),
+            chk(r"NAME\s+SIZE\s+FSTYPE\s+PARTTYPENAME", "includes the lsblk output"),
+            chk(r"grubx64\.efi|cannot access", "shows the boot loader files in the ESP, or that there is none (BIOS)")]},
+        quiz=[q("esp", "Where does UEFI find its boot loader?", "esp",
+                [{"value": "esp", "label": "A .efi file on the EFI system partition"}, {"value": "mbr", "label": "The boot code in the MBR"}, {"value": "boot", "label": "/boot/grub on the root filesystem"}],
+                "Correct. The ESP is a small FAT filesystem, mounted on /boot/efi on Mint.")]),
+    3: dict(level="Beginner", nav="MBR, 55 aa",
+        paste={"command": "cat reports/sector0.txt", "checks": [
+            chk(r"DOS/MBR boot sector", "file identifies a DOS/MBR boot sector"),
+            chk(r"^\s*55 aa\s*$", "the last two bytes are the 55 aa signature")]},
+        quiz=[q("layout", "How is the 512-byte MBR divided?", "446",
+                [{"value": "446", "label": "446 bytes boot code, 64 bytes partition table, 2 bytes signature"}, {"value": "256", "label": "256 bytes boot code, 254 bytes table, 2 bytes signature"}, {"value": "510", "label": "510 bytes boot code, 2 bytes signature"}],
+                "Correct. The table has room for four 16-byte entries."),
+              q("chain", "Why does the MBR boot code only load the next stage?", "small",
+                [{"value": "small", "label": "446 bytes is too small for a full boot loader"}, {"value": "uefi", "label": "UEFI requires it"}, {"value": "safe", "label": "So the disk can't be overwritten"}],
+                "Correct. Handing off to a bigger loader is called chain loading.")]),
+    4: dict(level="Intermediate", nav="uname -r, /boot, vmlinuz",
+        paste={"command": "cat reports/kernel.txt", "checks": [
+            chk(r"^\d+\.\d+\.\d+\S*\s*$", "the first line is the running kernel from uname -r"),
+            chk(r"(vmlinuz|initrd\.img|config|System\.map)-\d+\.\d+", "/boot lists the kernel, initrd, config and System.map files", min=4),
+            chk(r"Linux kernel x86 boot executable,? bzImage", "file identifies the kernel as a bzImage")]},
+        quiz=[q("z", "What does the z in <code>vmlinuz</code> mean?", "comp",
+                [{"value": "comp", "label": "The kernel is compressed"}, {"value": "zfs", "label": "It supports ZFS"}, {"value": "zero", "label": "It is the first kernel"}],
+                "Correct. It is a compressed kernel image.")]),
+    5: dict(level="Intermediate", nav="lsinitramfs, initrd",
+        paste={"command": "cat reports/initramfs.txt", "checks": [
+            chk(r"\s\d+(\.\d+)?M\s.*initrd\.img-", "ls -lh shows the initramfs size in megabytes"),
+            chk(r"^\s*\d{4,6}\s*$", "the file count is in the thousands"),
+            chk(r"kernel/\S*(ext4|ahci|virtio|nvme)", "lists at least one disk or filesystem driver module")]},
+        quiz=[q("why", "Why does the kernel need an initramfs?", "drivers",
+                [{"value": "drivers", "label": "It carries the drivers needed to mount the real root filesystem"}, {"value": "menu", "label": "It holds the boot menu"}, {"value": "swap", "label": "It is the first swap area"}],
+                "Correct. Once root is mounted, init takes over."),
+              q("rebuild", "Which command rebuilds the initramfs on Red Hat?", "dracut",
+                [{"value": "dracut", "label": "<code>dracut</code>"}, {"value": "upd", "label": "<code>update-initramfs -u</code>"}, {"value": "lsi", "label": "<code>lsinitramfs</code>"}],
+                "Correct. Mint and Debian use update-initramfs; older systems used mkinitrd.")]),
+    6: dict(level="Intermediate", nav="grub.cfg menuentry",
+        paste={"command": "cat reports/grub-trace.txt", "checks": [
+            chk(r"^\s*linux\s+\S*vmlinuz-\S+", "the linux line names a vmlinuz file"),
+            chk(r"^\s*initrd\s+\S*initrd\.img-\S+", "the initrd line names an initrd.img file"),
+            chk(r"vmlinuz-(\d\S*)\s[\s\S]*^\1\s*$", "the default entry's kernel matches uname -r"),
+            chk(r"configfile|No such file or directory", "shows the short grub.cfg in the ESP, or that there is none (BIOS)")]},
+        quiz=[q("cfg", "Where is the GRUB2 configuration on Mint?", "mint",
+                [{"value": "mint", "label": "<code>/boot/grub/grub.cfg</code>"}, {"value": "rh", "label": "<code>/boot/grub2/grub.cfg</code>"}, {"value": "lst", "label": "<code>/boot/grub/menu.lst</code>"}],
+                "Correct. Red Hat uses /boot/grub2/grub.cfg; menu.lst is GRUB Legacy.")]),
+    7: dict(level="Intermediate", nav="/proc/cmdline, root=",
+        paste={"command": "cat reports/cmdline.txt", "checks": [
+            chk(r"^BOOT_IMAGE=", "includes /proc/cmdline"),
+            chk(r"root=UUID=([0-9a-f-]+)[\s\S]*^\S+\s+\1\s*$|root=(/dev/\S+)[\s\S]*^\2\s", "the root= value matches the filesystem mounted on /"),
+            chk(r"\sro(\s|$)", "the root filesystem starts read-only (ro)"),
+            chk(r"quiet\s+splash", "the default quiet splash parameters are there")]},
+        quiz=[q("ro", "Why does the command line say <code>ro</code>?", "check",
+                [{"value": "check", "label": "Root mounts read-only first so it can be checked, then is remounted read-write"}, {"value": "always", "label": "Root stays read-only until reboot"}, {"value": "rescue", "label": "It boots into rescue mode"}],
+                "Correct."),
+              q("temp", "You added a parameter at the GRUB menu for this boot. Where does it show?", "proc",
+                [{"value": "proc", "label": "<code>/proc/cmdline</code>"}, {"value": "default", "label": "<code>/etc/default/grub</code>"}, {"value": "cfg", "label": "<code>/boot/grub/grub.cfg</code>"}],
+                "Correct. /proc/cmdline shows what this boot actually received.")]),
+    8: dict(level="Intermediate", nav="menu.lst, (hd0,0)",
+        paste={"command": "cat reports/legacy-menu.txt", "checks": [
+            chk(r"^default=1", "the default line is included"),
+            chk(r"^[01]: title", "both title sections are numbered from 0", count=2),
+            chk(r"^Answer:.*2\.6\.32-696", "the Answer line names the 2.6.32-696 kernel")]},
+        quiz=[q("hd00", "In GRUB Legacy, what is <code>(hd0,0)</code>?", "sda1",
+                [{"value": "sda1", "label": "<code>/dev/sda1</code>"}, {"value": "sda", "label": "<code>/dev/sda</code>, the whole disk"}, {"value": "sda0", "label": "A partition before sda1"}],
+                "Correct. GRUB Legacy counts disks and partitions from 0."),
+              q("default2", "<code>default=2</code> in menu.lst boots which entry?", "third",
+                [{"value": "second", "label": "The second title"}, {"value": "third", "label": "The third title"}, {"value": "last", "label": "The last title"}],
+                "Correct. default counts titles from 0.")]),
+    9: dict(level="Advanced", nav="PID 1, runlevel, inittab",
+        paste={"command": "cat reports/init.txt", "checks": [
+            chk(r"^\s*1\s+systemd\s*$", "PID 1 is systemd"),
+            chk(r"^graphical\.target\s*$", "the default target is graphical.target"),
+            chk(r"^N 5\s*$|run-level 5", "the current runlevel equivalent is 5"),
+            chk(r"^id:3:initdefault:", "the sample inittab's default runlevel is included")]},
+        quiz=[q("inittab", "Where did SysVinit read its default runlevel?", "inittab",
+                [{"value": "inittab", "label": "The initdefault line in <code>/etc/inittab</code>"}, {"value": "default", "label": "<code>/etc/default/grub</code>"}, {"value": "rc", "label": "<code>/etc/rc.local</code>"}],
+                "Correct."),
+              q("upstart", "Which init system was managed with <code>initctl</code>?", "Upstart",
+                ["SysVinit", "Upstart", "systemd"], "Correct. Upstart was used by older Ubuntu releases.")]),
+    10: dict(level="Advanced", nav="runlevelN.target",
+        paste={"command": "cat reports/runlevel-map.txt", "checks": [
+            chk(r"runlevel1\.target -> rescue\.target", "runlevel1 points to rescue.target"),
+            chk(r"runlevel3\.target -> multi-user\.target", "runlevel3 points to multi-user.target"),
+            chk(r"runlevel5\.target -> graphical\.target", "runlevel5 points to graphical.target"),
+            chk(r"^\s*\S*\s*multi-user\.target\s+loaded\s+active", "the active targets are listed")]},
+        quiz=[q("rl3", "Which systemd target matches the old text-mode runlevel 3?", "multi",
+                [{"value": "multi", "label": "<code>multi-user.target</code>"}, {"value": "graph", "label": "<code>graphical.target</code>"}, {"value": "rescue", "label": "<code>rescue.target</code>"}],
+                "Correct. graphical.target adds the desktop, like runlevel 5.")]),
+    11: dict(level="Advanced", nav="dmesg -T, --level",
+        paste={"command": "cat reports/web01-findings.txt reports/dmesg.txt", "checks": [
+            chk(r"failed to load e1000e/nic-fw\.bin", "web01's missing firmware file is found"),
+            chk(r"probe of \S+ failed with error -2", "web01's failed probe is found"),
+            chk(r"^\[[a-z]{3} [a-z]{3}\s+\d+ \d\d:\d\d:\d\d \d{4}\] Linux version", "dmesg -T starts with the Linux version line and real timestamps"),
+            chk(r"Kernel command line:", "the kernel command line message is included")]},
+        quiz=[q("ring", "Why might dmesg no longer show the first boot messages?", "ring",
+                [{"value": "ring", "label": "The ring buffer is fixed in size, so new messages push old ones out"}, {"value": "reboot", "label": "dmesg is cleared every hour"}, {"value": "root", "label": "Only root can see them"}],
+                "Correct. journalctl -k keeps them in the journal."),
+              q("c", "Which dmesg option should you avoid on a shared server?", "c",
+                [{"value": "c", "label": "<code>-c</code>"}, {"value": "T", "label": "<code>-T</code>"}, {"value": "level", "label": "<code>--level</code>"}],
+                "Correct. -c clears the buffer after reading it.")]),
+    12: dict(level="Advanced", nav="journalctl -b, -k, --list-boots",
+        paste={"command": "cat reports/journal.txt", "checks": [
+            chk(r"^\s*0\s+[0-9a-f]{32}\s", "the boot list shows the current boot (0)"),
+            chk(r"kernel: Linux version", "the first kernel lines of this boot are there"),
+            chk(r"^\s*-1\s+[0-9a-f]{32}\s|No such boot|not available|no persistent journal", "shows the previous boot, or a note that none is recorded"),
+            chk(r"/var/log/(boot|kern)\.log", "includes the check of the boot log files")]},
+        quiz=[q("prev", "Which command shows kernel messages from the previous boot?", "b1k",
+                [{"value": "b1k", "label": "<code>journalctl -b -1 -k</code>"}, {"value": "b1", "label": "<code>journalctl -1</code>"}, {"value": "dmesg", "label": "<code>dmesg -b -1</code>"}],
+                "Correct. It needs a persistent journal in /var/log/journal."),
+              q("err", "Which option limits journalctl to errors and worse?", "perr",
+                [{"value": "perr", "label": "<code>-p err</code>"}, {"value": "k", "label": "<code>-k</code>"}, {"value": "e", "label": "<code>-e</code>"}],
+                "Correct.")]),
+    13: dict(level="Advanced", nav="systemd-analyze",
+        paste={"command": "cat reports/boot-time.txt", "checks": [
+            chk(r"^Startup finished in .*\(kernel\).*\(userspace\)", "the first line shows kernel and userspace times"),
+            chk(r"^\s*(\d+min\s+)?\d+(\.\d+)?m?s\s+\S+\.(service|mount|device|socket|target|swap)\s*$", "the slowest units from blame are listed", min=3),
+            chk(r"\.target @\d+(\.\d+)?m?s", "the critical chain is included")]},
+        quiz=[q("chain", "Which command shows the units that actually delayed the boot?", "cc",
+                [{"value": "cc", "label": "<code>systemd-analyze critical-chain</code>"}, {"value": "blame", "label": "<code>systemd-analyze blame</code>"}, {"value": "plain", "label": "<code>systemd-analyze</code>"}],
+                "Correct. blame ignores that units start in parallel.")]),
+}
+
+TRAP_QUIZ = [
+    q("tq1", "What is the order of the boot?", "order",
+      [{"value": "order", "label": "Firmware, boot loader, kernel with initramfs, init"}, {"value": "o2", "label": "Boot loader, firmware, init, kernel"}, {"value": "o3", "label": "Firmware, kernel, boot loader, init"}], "Correct."),
+    q("tq2", "Where does UEFI load its boot loader from?", "esp",
+      [{"value": "esp", "label": "A .efi file on the EFI system partition"}, {"value": "mbr", "label": "The first 446 bytes of the disk"}, {"value": "boot", "label": "/boot/vmlinuz"}], "Correct. BIOS is the one that runs MBR code."),
+    q("tq3", "How big is the MBR boot code area?", "446", ["64", "446", "510", "512"], "Correct. Then 64 bytes of partition table and the 55 aa signature."),
+    q("tq4", "How does the modern initramfs differ from the old initrd?", "cpio",
+      [{"value": "cpio", "label": "initramfs is a cpio archive; initrd was a disk image"}, {"value": "same", "label": "They are the same file format"}, {"value": "kernel", "label": "initramfs is part of the kernel image"}], "Correct. The GRUB keyword is still initrd."),
+    q("tq5", "Which GRUB Legacy name means <code>/dev/sdb2</code>?", "hd11",
+      [{"value": "hd11", "label": "<code>(hd1,1)</code>"}, {"value": "hd12", "label": "<code>(hd1,2)</code>"}, {"value": "hd22", "label": "<code>(hd2,2)</code>"}], "Correct. Legacy counts disks and partitions from 0."),
+    q("tq6", "Which boot loader works only with UEFI?", "sdboot",
+      [{"value": "lilo", "label": "LILO"}, {"value": "sdboot", "label": "systemd-boot"}, {"value": "grub2", "label": "GRUB2"}], "Correct. LILO is BIOS-only; GRUB2 handles both."),
+    q("tq7", "What is PID 1 on Linux Mint?", "systemd", ["init.d", "systemd", "upstart", "kthreadd"], "Correct. It is written in lowercase."),
+    q("tq8", "<code>journalctl -b -1</code> says the boot isn't available. Why?", "volatile",
+      [{"value": "volatile", "label": "The journal isn't persistent, so earlier boots weren't kept"}, {"value": "root", "label": "-b -1 only works for root"}, {"value": "syntax", "label": "The option should be -b 1"}], "Correct. Persistent logs live in /var/log/journal."),
+]
+
+ANSWERS = [
+    "Check each guest for <code>/sys/firmware/efi</code>: it exists only on a UEFI boot. <code>sudo efibootmgr</code> lists the firmware boot entries on UEFI, and <code>findmnt /boot/efi</code> shows the EFI system partition.",
+    "Read the default <code>menuentry</code> and its <code>linux</code> and <code>initrd</code> lines in <code>/boot/grub/grub.cfg</code> (with sudo), and compare the version with <code>uname -r</code>. <code>cat /proc/cmdline</code> shows the kernel actually booted.",
+    "List it with <code>lsinitramfs /boot/initrd.img-$(uname -r) | grep -E 'ahci|nvme|virtio'</code>. If the module isn't there, check whether it's built in with <code>grep -E 'AHCI|NVME' /boot/config-$(uname -r)</code> (=y means built in).",
+    "default counts titles from 0, so <code>default=1</code> boots the second title. Its <code>root (hd0,0)</code> line means the first partition of the first disk, <code>/dev/sda1</code>.",
+    "<code>ps -p 1 -o comm</code> shows <code>systemd</code>, and <code>systemctl get-default</code> shows the default target, usually <code>graphical.target</code> (<code>runlevel</code> prints N 5). A SysVinit system would use the initdefault line in /etc/inittab.",
+    "<code>sudo dmesg -T --level=err,warn</code>, or <code>journalctl -b -k -p warning</code>, and grep for the driver name. A line such as <em>failed to load … firmware</em> or <em>probe … failed</em> explains it.",
+    "<code>systemd-analyze</code> shows the time spent in firmware, loader, kernel and userspace. <code>systemd-analyze blame</code> lists the slowest units, and <code>systemd-analyze critical-chain</code> shows the chain that delayed the boot.",
+]

@@ -34,7 +34,7 @@ hook = S["Memory hook"][0][1]
 labs = [b[1] for b in B if b[0] == "lab"]
 lessons = []
 for i, L in enumerate(labs, 1):
-    m = re.match(r"Lab (\d+): (.*)", L["title"])
+    m = re.match(r"Lab (\d+)(?: \(optional\))?: (.*)", L["title"])
     n, title = int(m.group(1)), m.group(2)
     ex = X["LABS"][n]
     lessons.append({
@@ -58,10 +58,21 @@ review = {
     "questions": [{"q": q, "a": X["ANSWERS"][k]} for k, q in enumerate(next(b[1] for b in S["LPIC-Style Practical Questions"] if b[0] == "bullets"))],
     "mastery": next(b[1] for b in S["Mastery Checklist"] if b[0] == "bullets"),
 }
+# Any other h2 part of the workbook (for example a read-and-explain comparison) becomes a
+# reference card on the section page, so no workbook content is dropped.
+KNOWN = {"How to use this workbook", "Lab Setup", "Commands to Memorize", "Memory hook", "Common Exam Traps",
+         "Scenario-Based Challenge Exam", "LPIC-Style Practical Questions", "Mastery Checklist"}
+reference = []
+for name, blocks in S.items():
+    if name in KNOWN or any(b[0] == "lab" for b in blocks):
+        continue
+    reference.append({"title": name, "paragraphs": [b[1] for b in blocks if b[0] == "p"],
+                      "bullets": [i for b in blocks if b[0] in ("bullets", "numbered") for i in b[1]]})
+
 section = {
     "id": f"section-{X['NUMBER']:02d}", "number": X["NUMBER"], "title": X["TITLE"], "objectives": X["OBJECTIVES"],
     "kind": "vm", "source": X["SOURCE"], "scenario": title_sub,
-    "overview": {"paragraphs": how, "setup": setup, "commands": commands, "memoryHook": hook},
+    "overview": {"paragraphs": how, "setup": setup, "commands": commands, "memoryHook": hook, "reference": reference},
     "lessons": lessons, "review": review,
 }
 js = (f"/* Section {X['NUMBER']}: {X['TITLE']}. Generated from {X['SOURCE']} by vm_section.py;\n"

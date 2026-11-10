@@ -99,7 +99,8 @@ LPIC.section({
    "losetup -d",
    "findmnt and /sys/firmware/efi"
   ],
-  "memoryHook": "Think of storage as building a town. The disk is the raw land. Partitions are the lots marked out on it. A filesystem is the building plan that lets you store and find things on a lot. The mount point is the street address where people reach the building. LVM is a land agency that pools several lots into one big flexible lot, and swap is an overflow car park for RAM. Each layer has its own command: lsblk shows land and lots, lsblk -f shows building plans, and findmnt shows addresses."
+  "memoryHook": "Think of storage as building a town. The disk is the raw land. Partitions are the lots marked out on it. A filesystem is the building plan that lets you store and find things on a lot. The mount point is the street address where people reach the building. LVM is a land agency that pools several lots into one big flexible lot, and swap is an overflow car park for RAM. Each layer has its own command: lsblk shows land and lots, lsblk -f shows building plans, and findmnt shows addresses.",
+  "reference": []
  },
  "lessons": [
   {

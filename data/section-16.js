@@ -152,7 +152,8 @@ LPIC.section({
    "btrfstune",
    "btrfs balance"
   ],
-  "memoryHook": "Identify, attach, remember, measure, repair. lsblk and blkid identify a filesystem by device, label, and UUID. mount attaches it to a directory and umount detaches it. /etc/fstab remembers the mount for the next boot, and systemd turns each line into a .mount unit. df measures whole filesystems, du measures directories, and df -i counts inodes. fsck and xfs_repair only repair what is not mounted. For the six fstab fields, remember Don't Make The Old Dog Panic: Device, Mount point, Type, Options, Dump, Pass."
+  "memoryHook": "Identify, attach, remember, measure, repair. lsblk and blkid identify a filesystem by device, label, and UUID. mount attaches it to a directory and umount detaches it. /etc/fstab remembers the mount for the next boot, and systemd turns each line into a .mount unit. df measures whole filesystems, du measures directories, and df -i counts inodes. fsck and xfs_repair only repair what is not mounted. For the six fstab fields, remember Don't Make The Old Dog Panic: Device, Mount point, Type, Options, Dump, Pass.",
+  "reference": []
  },
  "lessons": [
   {
