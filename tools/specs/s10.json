@@ -1,0 +1,284 @@
+[
+ ["h1", "LPIC-1 Section 10 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objectives 104.5 and 104.6: Manage file permissions and ownership, and create and change hard and symbolic links, using realistic access tickets, audits, and release changes."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like an access ticket or an audit finding, not a chmod drill. Read the scenario, decide who needs what access, make the smallest change that delivers it, and prove the result from the command line with ls -l, stat, or a test that should fail."],
+ ["p", "Use a Linux Mint VM and stay inside ~/lpic1-section10. Never change permissions or owners on system files under /etc, /usr, or /var; the audit labs only read them. A few steps need sudo, and each one says so. The sticky bit lab works in its own folder under /tmp and removes it at the end."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Check which groups you belong to. On Linux Mint the first user created at install is normally a member of the adm group, which several labs use:"],
+ ["p", "id -Gn"],
+ ["p", "If adm is not in the list, use sudo in front of the chgrp and chown commands that name adm."],
+ ["p", "Step 2: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section10/{reports,shared,deploy,logs,releases/app-1.0,releases/app-1.1}"],
+ ["p", "cd ~/lpic1-section10"],
+ ["p", "Step 3: Create the sample files and give them the starting permissions the labs expect:"],
+ ["p", "printf 'db_user=svc-backup\\ndb_pass=CHANGE-ME\\n' > deploy/db.credentials"],
+ ["p", "printf '#!/bin/bash\\necho \"Deploying app02\"\\n' > deploy/deploy.sh"],
+ ["p", "printf 'web01 OK\\nweb02 OK\\ndb01 WARN\\n' > logs/health.log"],
+ ["p", "echo 'version=1.0' > releases/app-1.0/app.conf; echo 'version=1.1' > releases/app-1.1/app.conf"],
+ ["p", "chmod 666 deploy/db.credentials; chmod 644 deploy/deploy.sh logs/health.log; chmod 777 releases/app-1.0/app.conf"],
+ ["p", "Validation check: Run ls -lR and confirm deploy, logs, and releases contain the files above, and that db.credentials shows -rw-rw-rw-. If a lab goes wrong, rerun Step 3 to reset the files and their modes."],
+ ["h2", "Commands to Memorize"],
+ ["p", "ls -l, ls -ld, ls -i, ls -li, stat, file, whoami, id, id -u, id -g, id -gn, id -G, id -Gn, groups, getent group, chown, chown user:group, chown :group, chown -R, chgrp, chgrp -R, chmod, chmod u+x, chmod go=, chmod a=r, chmod u=rwX,go=rX, chmod 640, chmod 4755, chmod 2775, chmod 1777, chmod u+s, chmod g+s, chmod o+t, umask, umask -S, umask 027, mkfifo, find -perm, find -type, find -samefile, find -xtype l, ln, ln -s, ln -sf, ln -sfn, readlink, readlink -f, and sudo -u."],
+ ["h2", "Memory hook"],
+ ["p", "Read a mode as one type character plus three triplets: user, group, other, each in the order r, w, x. In octal, r is 4, w is 2, and x is 1, so 7 is everything and 0 is nothing. A fourth digit in front adds the special bits: 4 for SUID, 2 for SGID, and 1 for sticky. The umask is what gets taken away from 666 for files and 777 for directories. A hard link is a second name for the same inode; a symbolic link is a small file that holds a path."],
+ ["h2", "Beginner Labs: Reading Permissions and Ownership"],
+ ["lab", {
+   "title": "Lab 1: Decode a long listing for a security audit",
+   "scenario": "An auditor flags the deploy folder and asks for the exact mode, owner, and group of every file in it, in both letters and numbers.",
+   "task": "Produce a listing of the deploy and logs folders and of the deploy directory itself, then add the octal modes.",
+   "deliverable": "reports/listing.txt with ls and stat output.",
+   "steps": [
+    "ls -l deploy logs > reports/listing.txt",
+    "ls -ld deploy >> reports/listing.txt",
+    "stat -c '%A %a %U %G %n' deploy/* logs/* >> reports/listing.txt"
+   ],
+   "validation": "cat reports/listing.txt and confirm db.credentials shows -rw-rw-rw- and 666. That is the audit finding: anyone on the system can read and change the database password.",
+   "trap": "ls -l on a directory lists what is inside it. Add -d to see the directory's own mode and owner. The number after the mode is the link count, not a size."
+ }],
+ ["lab", {
+   "title": "Lab 2: Identify every file type in an inventory",
+   "scenario": "A junior engineer asks why some entries in /dev and /run start with b, c, s, or p instead of a dash or d.",
+   "task": "Create a named pipe and a symbolic link in the lab folder, find examples of the other types on the system, and list them together.",
+   "deliverable": "reports/file-types.txt with one example of each type, and reports/file-cmd.txt with what the file command says about three of them.",
+   "steps": [
+    "mkfifo work.pipe; ln -s logs/health.log latest.log",
+    "ls -ld logs/health.log logs work.pipe latest.log /dev/null > reports/file-types.txt",
+    "find /dev -maxdepth 1 -type b | head -2 | xargs -r ls -l >> reports/file-types.txt",
+    "find /run -maxdepth 2 -type s 2>/dev/null | head -2 | xargs -r ls -l >> reports/file-types.txt",
+    "file /dev/null work.pipe latest.log > reports/file-cmd.txt"
+   ],
+   "validation": "cut -c1 reports/file-types.txt | sort | uniq -c and confirm you see -, d, l, p, c, b, and s.",
+   "trap": "The type codes are - regular file, d directory, l symbolic link, b block device, c character device, p named pipe (FIFO), and s socket. Disks are block devices; terminals and /dev/null are character devices."
+ }],
+ ["lab", {
+   "title": "Lab 3: Confirm your identity and groups before an access ticket",
+   "scenario": "A ticket says you cannot read a file owned by the adm group. Before changing anything, the team lead wants proof of who you are and which groups you are in.",
+   "task": "Record your user name, your UID and GIDs, your primary group, and the members of adm.",
+   "deliverable": "reports/identity.txt.",
+   "steps": [
+    "whoami > reports/identity.txt",
+    "id >> reports/identity.txt",
+    "id -gn >> reports/identity.txt; id -Gn >> reports/identity.txt; groups >> reports/identity.txt",
+    "getent group adm >> reports/identity.txt"
+   ],
+   "validation": "cat reports/identity.txt and confirm the id -gn line matches your user name and that adm appears in the id -Gn and groups lines.",
+   "trap": "id -g shows only the primary (effective) group; id -G shows all of them. A group you were just added to does not apply until you log in again or run newgrp, so a fresh membership can look like it is not working."
+ }],
+ ["lab", {
+   "title": "Lab 4: Change the group and owner of a log file",
+   "scenario": "Log reviewers in the adm group need to read logs/health.log, and the security team wants the file owned by root during a review. Afterwards it goes back to you.",
+   "task": "Change the group with chgrp, change the owner with chown, change both at once, and then return the file to yourself.",
+   "deliverable": "reports/ownership.txt showing the owner and group after each change.",
+   "steps": [
+    "chgrp adm logs/health.log; ls -l logs/health.log > reports/ownership.txt",
+    "sudo chown root logs/health.log; ls -l logs/health.log >> reports/ownership.txt",
+    "sudo chown root:adm logs/health.log; ls -l logs/health.log >> reports/ownership.txt",
+    "sudo chown $USER:$USER logs/health.log; ls -l logs/health.log >> reports/ownership.txt",
+    "chown :adm logs/health.log; ls -l logs/health.log >> reports/ownership.txt"
+   ],
+   "validation": "cat reports/ownership.txt and follow the owner and group columns through all five lines. The last line shows you as owner and adm as group.",
+   "trap": "Only root can give a file to another user, so chown needs sudo. You can change the group of a file you own without sudo, but only to a group you belong to. chown :group changes just the group, and chown user: sets the group to that user's login group."
+ }],
+ ["h2", "Intermediate Labs: Changing Modes"],
+ ["lab", {
+   "title": "Lab 5: Lock down a credentials file with symbolic mode",
+   "scenario": "Follow-up to the audit in Lab 1: db.credentials must be readable and writable only by its owner, and deploy.sh must be executable by its owner.",
+   "task": "Fix both files with symbolic chmod, one change at a time, and record the mode after each change.",
+   "deliverable": "reports/symbolic.txt.",
+   "steps": [
+    "chmod o-w deploy/db.credentials; stat -c '%a %A %n' deploy/db.credentials > reports/symbolic.txt",
+    "chmod go= deploy/db.credentials; stat -c '%a %A %n' deploy/db.credentials >> reports/symbolic.txt",
+    "chmod u+x deploy/deploy.sh; stat -c '%a %A %n' deploy/deploy.sh >> reports/symbolic.txt",
+    "Practice on a scratch copy: cp deploy/deploy.sh reports/scratch.sh, then try chmod a=x, chmod u=rw,go=r, and chmod ug+w,o-r on it, checking with ls -l after each one."
+   ],
+   "validation": "cat reports/symbolic.txt and confirm the lines read 664, then 600 -rw-------, then 744 -rwxr--r--.",
+   "trap": "u means the user who owns the file, and o means other, not owner. = sets the level to exactly what you list, so go= removes everything from group and other. a=x leaves only execute everywhere."
+ }],
+ ["lab", {
+   "title": "Lab 6: Set standard modes with octal numbers",
+   "scenario": "The team standard for the deploy area is: scripts 750, logs 640, credentials 600, and the deploy directory 750.",
+   "task": "Apply the standard with octal chmod and prove each mode.",
+   "deliverable": "reports/octal.txt.",
+   "steps": [
+    "chmod 750 deploy/deploy.sh deploy; chmod 640 logs/health.log; chmod 600 deploy/db.credentials",
+    "stat -c '%a %A %n' deploy deploy/* logs/health.log > reports/octal.txt",
+    "Work out these by hand, then check them on reports/scratch.sh: 764, 755, 644, 000, and back to 644."
+   ],
+   "validation": "cat reports/octal.txt and confirm 750 drwxr-x---, 750 -rwxr-x---, 600 -rw-------, and 640 -rw-r-----.",
+   "trap": "Octal mode always sets all three levels at once; there is no octal way to change just the group. Any digit that includes execute is odd. A leading 0, as in 0644, means no special bits and is the same as 644."
+ }],
+ ["lab", {
+   "title": "Lab 7: Explain why a user can list a folder but not open its files",
+   "scenario": "A ticket says: I can see the file names in the handoff folder, but every file says Permission denied. Another user can open a file by name but cannot list the folder.",
+   "task": "Reproduce both complaints on a test folder by changing r, w, and x on the directory, then restore it.",
+   "deliverable": "reports/dir-perms.txt with the errors you reproduced.",
+   "steps": [
+    "mkdir -p shared/handoff; echo 'call db01 owner' > shared/handoff/note.txt",
+    "chmod u=rw shared/handoff; ls shared/handoff > reports/dir-perms.txt 2>&1; cat shared/handoff/note.txt >> reports/dir-perms.txt 2>&1",
+    "chmod u=x shared/handoff; ls shared/handoff >> reports/dir-perms.txt 2>&1; cat shared/handoff/note.txt >> reports/dir-perms.txt 2>&1",
+    "chmod u=rx shared/handoff; touch shared/handoff/new.txt >> reports/dir-perms.txt 2>&1",
+    "chmod 755 shared/handoff"
+   ],
+   "validation": "cat reports/dir-perms.txt. With rw- the names list but cat is denied; with --x cat works but ls is denied; with r-x touch is denied.",
+   "trap": "On a directory, r lists names, x lets you enter it and reach files inside, and w lets you create, rename, and delete entries. Deleting a file depends on the directory's w, not on the file's own mode."
+ }],
+ ["lab", {
+   "title": "Lab 8: Fix modes and ownership across a whole release tree",
+   "scenario": "A release was copied from a USB stick and the modes are a mess: one config is 777. Directories must be 755 and files 644, and the tree must be owned by root:adm while operations reviews it.",
+   "task": "Fix the tree recursively without making plain files executable, then hand it back to yourself.",
+   "deliverable": "reports/releases-perms.txt.",
+   "steps": [
+    "chmod -R u=rwX,go=rX releases",
+    "find releases -type d -exec chmod 755 {} + ; find releases -type f -exec chmod 644 {} +",
+    "sudo chown -R root:adm releases; find releases -printf '%m %u:%g %p\\n' > reports/releases-perms.txt",
+    "sudo chown -R $USER: releases"
+   ],
+   "validation": "cat reports/releases-perms.txt and confirm every directory is 755, every file is 644, and every line shows root:adm.",
+   "trap": "chmod -R 755 would make every file executable. Capital X adds execute only to directories and to files that already have execute for someone, which is why the 777 config came out 755 after the first step and needed the find step. chgrp -R and chown -R work the same way recursively."
+ }],
+ ["lab", {
+   "title": "Lab 9: Diagnose new files that come out group-writable",
+   "scenario": "A security review asks why new files you create are group-writable, and wants to see what a stricter umask would produce.",
+   "task": "Record your umask, then create test files and folders under umask 027 and 077 without changing your session's umask.",
+   "deliverable": "reports/umask.txt.",
+   "steps": [
+    "umask > reports/umask.txt; umask -S >> reports/umask.txt",
+    "touch reports/u-default.txt; mkdir reports/u-default.dir",
+    "(umask 027; touch reports/u027.txt; mkdir reports/u027.dir)",
+    "(umask 077; touch reports/u077.txt; mkdir reports/u077.dir)",
+    "stat -c '%a %n' reports/u-default.* reports/u027.* reports/u077.* >> reports/umask.txt"
+   ],
+   "validation": "cat reports/umask.txt. With Mint's default umask 0002 you should see 664 and 775, then 640 and 750, then 600 and 700. If your umask differs, work out the expected modes first. Run umask again to confirm your session's value did not change.",
+   "trap": "New files start from 666 and directories from 777, and the umask removes bits from those. A umask never adds execute to a new file. The parentheses run umask in a subshell, so the change disappears when it ends. 027 and 0027 mean the same thing."
+ }],
+ ["h2", "Advanced Labs: Special Permissions and Links"],
+ ["lab", {
+   "title": "Lab 10: Audit SUID and SGID programs",
+   "scenario": "A compliance scan wants the list of programs that run with their owner's or group's privileges, plus an explanation of why passwd needs it.",
+   "task": "Find SUID and SGID files in the system binary folders, and record the modes of passwd and /tmp. This lab only reads.",
+   "deliverable": "reports/suid-audit.txt.",
+   "steps": [
+    "ls -l /usr/bin/passwd > reports/suid-audit.txt; ls -ld /tmp >> reports/suid-audit.txt",
+    "find /usr/bin /usr/sbin -type f -perm -4000 2>/dev/null >> reports/suid-audit.txt",
+    "echo '--- SGID ---' >> reports/suid-audit.txt; find /usr/bin /usr/sbin -type f -perm -2000 2>/dev/null >> reports/suid-audit.txt"
+   ],
+   "validation": "grep -E 'passwd|/tmp' reports/suid-audit.txt shows -rwsr-xr-x on passwd and drwxrwxrwt on /tmp.",
+   "trap": "passwd is SUID root so an ordinary user can update /etc/shadow, which only root can write. -perm -4000 means at least the SUID bit is set; -perm /6000 matches SUID or SGID."
+ }],
+ ["lab", {
+   "title": "Lab 11: Build a team folder with SGID and a drop folder with the sticky bit",
+   "scenario": "The ops team wants a shared folder where every new file belongs to the adm group automatically, and a public drop folder where people cannot delete each other's files.",
+   "task": "Set SGID on a lab folder and prove the group is inherited, then prove the sticky bit stops another user from deleting your file.",
+   "deliverable": "reports/team-folders.txt.",
+   "steps": [
+    "mkdir shared/ops; chgrp adm shared/ops; chmod 2775 shared/ops; touch shared/ops/runbook.txt shared/plain.txt",
+    "ls -ld shared/ops > reports/team-folders.txt; ls -l shared/ops/runbook.txt shared/plain.txt >> reports/team-folders.txt",
+    "mkdir /tmp/lpic1-drop; chmod 1777 /tmp/lpic1-drop; echo mine > /tmp/lpic1-drop/mine.txt",
+    "sudo -u nobody rm -f /tmp/lpic1-drop/mine.txt >> reports/team-folders.txt 2>&1; ls /tmp/lpic1-drop >> reports/team-folders.txt",
+    "chmod o-t /tmp/lpic1-drop; sudo -u nobody rm -f /tmp/lpic1-drop/mine.txt >> reports/team-folders.txt 2>&1; ls -A /tmp/lpic1-drop | wc -l >> reports/team-folders.txt",
+    "rm -r /tmp/lpic1-drop"
+   ],
+   "validation": "cat reports/team-folders.txt. shared/ops shows drwxrwsr-x, runbook.txt has group adm while plain.txt does not, the first rm by nobody says Operation not permitted, and the last count is 0 because without the sticky bit nobody could delete your file.",
+   "trap": "SGID on a directory makes new files inherit the directory's group; SGID on a program makes it run with the program's group. The sticky bit on a directory means only the file's owner, the directory's owner, or root can delete or rename a file in it."
+ }],
+ ["lab", {
+   "title": "Lab 12: Read and set special bits in octal, including the capital S and T",
+   "scenario": "A reviewer sees rwSr--r-- on a script and asks whether SUID is working. You need to show the difference between lowercase and capital letters.",
+   "task": "Set special bits in octal on test files and a test directory and record the results.",
+   "deliverable": "reports/special-bits.txt.",
+   "steps": [
+    "touch reports/sp-a reports/sp-b reports/sp-c reports/sp-d; mkdir reports/sp-dir reports/sp-dir2",
+    "chmod 4644 reports/sp-a; chmod 4755 reports/sp-b; chmod 2750 reports/sp-c; chmod 6755 reports/sp-d; chmod 1777 reports/sp-dir; chmod 1770 reports/sp-dir2",
+    "stat -c '%a %A %n' reports/sp-* > reports/special-bits.txt",
+    "chmod u-s,g-s reports/sp-d; chmod o-t reports/sp-dir; stat -c '%a %A %n' reports/sp-d reports/sp-dir >> reports/special-bits.txt"
+   ],
+   "validation": "cat reports/special-bits.txt and match: 4644 rwSr--r--, 4755 rwsr-xr-x, 2750 rwxr-s---, 6755 rwsr-sr-x, 1777 rwxrwxrwt, 1770 rwxrwx--T, then 755 and 777 after the removals.",
+   "trap": "A capital S or T means the special bit is set but the matching execute bit is missing, so it has no effect. With GNU chmod, a plain numeric mode such as 755 does not clear SGID on a directory; use chmod g-s, or a five-digit mode such as 00755."
+ }],
+ ["lab", {
+   "title": "Lab 13: Give a log a second name with hard and symbolic links",
+   "scenario": "Monitoring reads logs/health-soft.log and a cleanup script reads logs/health-hard.log, but both must see the same data as logs/health.log. Then someone deletes the original by mistake.",
+   "task": "Create a hard link and a symbolic link, compare them, delete the original, and see which name survives.",
+   "deliverable": "reports/links.txt.",
+   "steps": [
+    "ln logs/health.log logs/health-hard.log; ln -s health.log logs/health-soft.log",
+    "ls -li logs > reports/links.txt; stat -c '%i %h %n' logs/health.log logs/health-hard.log >> reports/links.txt",
+    "echo 'app02 OK' >> logs/health-hard.log; tail -1 logs/health.log >> reports/links.txt",
+    "rm logs/health.log; cat logs/health-hard.log >> reports/links.txt; cat logs/health-soft.log >> reports/links.txt 2>&1",
+    "find logs -xtype l >> reports/links.txt; ln logs/health-hard.log logs/health.log; find logs -samefile logs/health.log >> reports/links.txt"
+   ],
+   "validation": "cat reports/links.txt. The original and hard link share one inode with a link count of 2, the soft link is type l with an arrow, the hard link still has the data after rm, the soft link says No such file or directory, find -xtype l names it as broken, and after the restore it works again.",
+   "trap": "A copy gives two names and two sets of data; a hard link gives two names and one set of data. A symbolic link's target is stored as text and resolved from the link's own folder, which is why health.log, not logs/health.log, is the right target here."
+ }],
+ ["lab", {
+   "title": "Lab 14: Switch releases with a symbolic link and test the link limits",
+   "scenario": "The app reads its config from a current link. Tonight's change moves current from app-1.0 to app-1.1 in one step, and a teammate asks why you did not use a hard link.",
+   "task": "Point current at app-1.0, switch it to app-1.1 safely, and show the two things hard links cannot do.",
+   "deliverable": "reports/release-switch.txt.",
+   "steps": [
+    "ln -s releases/app-1.0 current; readlink current > reports/release-switch.txt",
+    "ln -sfn releases/app-1.1 current; readlink current >> reports/release-switch.txt; readlink -f current >> reports/release-switch.txt; cat current/app.conf >> reports/release-switch.txt",
+    "ln releases releases-hard >> reports/release-switch.txt 2>&1",
+    "ln logs/health.log /dev/shm/health.log >> reports/release-switch.txt 2>&1",
+    "ln -s \"$PWD/logs/health.log\" /dev/shm/health.log; cat /dev/shm/health.log >> reports/release-switch.txt; rm /dev/shm/health.log"
+   ],
+   "validation": "cat reports/release-switch.txt and confirm current moved from releases/app-1.0 to releases/app-1.1, the config says version=1.1, the hard link to a directory was refused, and the hard link to /dev/shm failed with Invalid cross-device link while the absolute symlink worked.",
+   "trap": "Without -n, ln -sf with a link that points to a directory creates the new link inside that directory instead of replacing it. Hard links cannot cross file systems and cannot point to directories; symbolic links can do both, and use an absolute path when the link lives somewhere else."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+   "Reading o as owner. In chmod, u is the owning user, g is the group, o is other (world), and a is all three.",
+   "Forgetting that = replaces. chmod g=r removes w and x from the group even if they were set before.",
+   "Mixing up the octal values. r is 4, w is 2, x is 1. 6 is rw, 5 is rx, and any odd digit includes execute.",
+   "Thinking octal can change one level. chmod 640 always sets owner, group, and other together.",
+   "Miscounting four-digit modes. The first digit is the special bits: 4 SUID, 2 SGID, 1 sticky. 6755 is SUID plus SGID.",
+   "Treating capital S or T as active. They mean the special bit is set but execute is missing at that level.",
+   "Confusing SGID on files and directories. On a program it runs with the file's group; on a directory new files inherit the directory's group.",
+   "Expecting the umask to be subtracted from 777 for files. Files start from 666, so umask 022 gives 644 files and 755 directories.",
+   "Thinking a non-root user can chown a file to someone else. Only root can change the owner; an owner can only change the group to one of their own groups.",
+   "Forgetting the colon forms. chown alice:ops sets both, chown :ops sets only the group, and chown alice: uses alice's login group.",
+   "Expecting ls -l dir to show the directory's own mode. Use ls -ld.",
+   "Mixing up link counts. A hard link raises the link count of both names; a symbolic link does not change it.",
+   "Expecting a symbolic link to survive deleting its target. It dangles; a hard link keeps the data until the last name is removed.",
+   "Trying to hard link a directory or across file systems. Both fail; use ln -s instead, and remember ln takes the target first and the new name second."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes. Use only your Linux Mint VM and the files in ~/lpic1-section10. Rerun Step 3 of the Lab Setup first so you start from the original modes."],
+ ["numbered", [
+   "Record your user name, primary group, and every group you belong to in reports/challenge-id.txt.",
+   "Make deploy/db.credentials readable and writable only by its owner using symbolic mode, then prove it with stat.",
+   "Set deploy/deploy.sh to 750 with octal mode and logs/health.log to 640.",
+   "Fix every mode under releases so directories are 755 and files are 644, without making any file executable.",
+   "Create shared/team with group adm so that new files inside it get group adm automatically. Prove it with a test file.",
+   "Show, with a subshell, the modes a new file and a new directory get under umask 077, while your own umask stays unchanged.",
+   "List every SUID program in /usr/bin and explain in one sentence why passwd is on the list.",
+   "Create a hard link and a symbolic link to logs/health.log, delete the original, and show which link still works."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each file, write a short sentence explaining what it proves."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+   "Security analyst request: “The database credentials file is world-writable. Make it owner-only and show me the numbers.”",
+   "Operations request: “Log reviewers are in the adm group. Give the group read access to the health log and nobody else.”",
+   "Team lead request: “Everything people save in the ops share should belong to the ops group without anyone running chgrp.”",
+   "Help desk request: “Users keep deleting each other’s files in the public drop folder. Stop that without locking anyone out.”",
+   "Compliance request: “Send me every program on this box that runs as root no matter who starts it.”",
+   "Release manager request: “Switch the app from version 1.0 to 1.1 in one command, and make it easy to switch back.”",
+   "Developer request: “Why do my new files come out rw-rw-r--? I want them rw-r----- by default.”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+   "I can read every field of ls -l output and name all seven file type codes.",
+   "I can show my user name, UID, primary group, and all my groups with whoami, id, and groups.",
+   "I can change a file's group with chgrp or chown :group, and its owner with sudo chown user:group.",
+   "I can change modes in symbolic form with u, g, o, a, +, -, and =, including several changes separated by commas.",
+   "I can convert between rwx letters and octal numbers in both directions.",
+   "I can explain what r, w, and x mean on a directory and why deleting a file depends on the directory.",
+   "I can fix a whole tree with chmod -R and capital X, or with find and -exec.",
+   "I can read and change the umask and predict the modes of new files and directories.",
+   "I can set and remove SUID, SGID, and the sticky bit in symbolic and four-digit octal form.",
+   "I can explain the difference between lowercase s and t and capital S and T.",
+   "I can create hard and symbolic links, find them with ls -li, stat, find -samefile, and find -xtype l, and say which survives deleting the original.",
+   "I can switch a symbolic link safely with ln -sfn and explain why hard links cannot cross file systems or point to directories."
+ ], 4]
+]

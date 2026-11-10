@@ -1,0 +1,283 @@
+[
+ ["h1", "LPIC-1 Section 20 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objectives 102.4 and 102.5 (overview): Understand Linux packages and manage Debian packages with dpkg, dpkg-reconfigure, apt-get, apt-cache, apt, and /etc/apt/sources.list through realistic software requests."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like an IT engineer task, not a command drill. Read the request, check the package before you change anything, make only the change the request asks for, and prove the result with dpkg or apt."],
+ ["p", "Linux Mint is a Debian-family system, so everything in this section runs for real on your VM. The labs only install and remove small harmless packages (sl, cowsay, tree) and a practice package, lab-notice, that you build yourself. Red Hat packaging (rpm and yum) is covered in Section 21. Package commands that change the system need sudo; commands that only read information do not."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Refresh the package lists, then install apt-file, which Mint does not include by default:"],
+ ["p", "sudo apt update"],
+ ["p", "sudo apt install apt-file && sudo apt-file update"],
+ ["p", "Step 2: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section20/{reports,debs,samples/lab-notice/DEBIAN,samples/lab-notice/etc,samples/lab-notice/usr/bin}"],
+ ["p", "cd ~/lpic1-section20"],
+ ["p", "Step 3: Create a practice repository list and a software request:"],
+ ["p", "printf '# Practice copy of the repository list for app02\\ndeb http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse\\ndeb http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse\\ndeb http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse\\n# deb-src http://archive.ubuntu.com/ubuntu noble main restricted\\ndeb [arch=amd64 signed-by=/usr/share/keyrings/example-archive-keyring.gpg] https://packages.example.com/apt stable main\\n' > samples/sources.list"],
+ ["p", "printf 'tree\\ncowsay\\n' > samples/requested-packages.txt"],
+ ["p", "Step 4: Create the files for the practice package lab-notice, which you build in Lab 7:"],
+ ["p", "printf 'Package: lab-notice\\nVersion: 1.0-1\\nArchitecture: all\\nMaintainer: Lab Admin <admin@example.com>\\nDepends: cowsay\\nDescription: Practice package that prints a maintenance notice\\n This package exists only for LPIC-1 practice.\\n' > samples/lab-notice/DEBIAN/control"],
+ ["p", "printf '/etc/lab-notice.conf\\n' > samples/lab-notice/DEBIAN/conffiles"],
+ ["p", "printf 'MESSAGE=\"Maintenance on web01 tonight at 22:00\"\\n' > samples/lab-notice/etc/lab-notice.conf"],
+ ["p", "printf '#!/bin/sh\\n. /etc/lab-notice.conf\\n/usr/games/cowsay \"$MESSAGE\"\\n' > samples/lab-notice/usr/bin/lab-notice"],
+ ["p", "chmod 755 samples/lab-notice/DEBIAN samples/lab-notice/usr/bin/lab-notice"],
+ ["p", "Validation check: Run find samples -type f and confirm sources.list, requested-packages.txt, control, conffiles, lab-notice.conf, and lab-notice exist. Run apt-file --help to confirm apt-file installed. If a lab goes wrong, rerun Steps 3 and 4 to reset the sample files."],
+ ["h2", "Commands to Memorize"],
+ ["p", "dpkg -i, -r, -P, -l, -L, -s, -S, -c, -I, -V, -C (--audit), --get-selections, dpkg-deb -I, -c, -f, -x, --build, dpkg-reconfigure, debconf-show, apt-get update, upgrade, dist-upgrade, install, install -f, install --reinstall, install -s, remove, purge, autoremove, download, clean, autoclean, check, apt-cache search, show, showpkg, depends, rdepends, policy, apt install, remove, purge, search, show, list --installed, list --upgradable, full-upgrade, apt-file update, apt-file search, apt-file list, /etc/apt/sources.list, /etc/apt/sources.list.d, /var/cache/apt/archives, and /var/lib/dpkg."],
+ ["h2", "Memory hook"],
+ ["p", "dpkg works on one package file at a time and never fetches anything: think of it as the installer. apt-get and apt fetch from repositories and solve dependencies: think of them as the shopper. apt-cache and apt-file only read: think of them as the catalog. Remove keeps the config and purge deletes it. Update refreshes the catalog; upgrade replaces the software."],
+ ["h2", "Beginner Labs: Packages and dpkg"],
+ ["lab", {
+  "title": "Lab 1: Inventory the package tools on a new build",
+  "scenario": "A ticket asks which package managers are present on a new Mint workstation so the build notes can say which install instructions apply.",
+  "task": "Check each common Debian and Red Hat package tool and record where it is or that it is missing.",
+  "deliverable": "reports/package-tools.txt.",
+  "steps": [
+   "for t in dpkg dpkg-reconfigure apt apt-get apt-cache apt-file rpm yum dnf zypper; do printf '%s: ' $t; command -v $t || echo missing; done > reports/package-tools.txt",
+   "type -a apt >> reports/package-tools.txt",
+   "Add two notes with nano: the difference between a binary package and a source package, and the difference between a low-level tool (dpkg, rpm) and a high-level tool (apt-get, yum, zypper)."
+  ],
+  "validation": "grep missing reports/package-tools.txt lists rpm, yum, dnf, and zypper, and grep -c dpkg reports/package-tools.txt is at least 2.",
+  "trap": "Debian packages end in .deb and are handled by dpkg and apt; Red Hat packages end in .rpm and are handled by rpm, yum, dnf, and zypper. On Mint, type -a apt may show a Mint wrapper in /usr/local/bin ahead of the real /usr/bin/apt."
+ }],
+ ["lab", {
+  "title": "Lab 2: Download a .deb and decode its file name",
+  "scenario": "A server team wants a copy of the sl package file for an offline host, and asks you to confirm its version and architecture before they copy it.",
+  "task": "Download the package without installing it and break the file name into its parts.",
+  "deliverable": "reports/deb-name.txt.",
+  "steps": [
+   "cd debs && apt download sl && cd ..",
+   "ls debs > reports/deb-name.txt",
+   "dpkg-deb -f debs/sl_*.deb Package Version Architecture >> reports/deb-name.txt"
+  ],
+  "validation": "cat reports/deb-name.txt. The file name follows name_version-revision_architecture.deb, such as sl_5.02-1_amd64.deb, and the fields below match it.",
+  "trap": "Debian uses underscores between the name, version, and architecture, and the word all for packages that run on any CPU. Red Hat uses dashes and dots and the word noarch. Run apt download as your normal user: with sudo it warns that the _apt user cannot write to your folder."
+ }],
+ ["lab", {
+  "title": "Lab 3: Review a package before approving it",
+  "scenario": "Change control requires you to list a package's dependencies and the files it will place on disk before it is installed.",
+  "task": "Show the package's control information and contents, then confirm it is not installed yet.",
+  "deliverable": "reports/sl-review.txt.",
+  "steps": [
+   "dpkg -I debs/sl_*.deb > reports/sl-review.txt",
+   "dpkg -c debs/sl_*.deb >> reports/sl-review.txt",
+   "dpkg -s sl >> reports/sl-review.txt 2>&1; echo \"exit code $?\" >> reports/sl-review.txt",
+   "dpkg -l 'sl*' >> reports/sl-review.txt 2>&1"
+  ],
+  "validation": "grep -E 'Depends|usr/games/sl|not installed|exit code' reports/sl-review.txt shows the dependencies, the program path, and a non-zero exit code from dpkg -s.",
+  "trap": "-I (--info) and -c (--contents) read a package file and need the file name. -s (--status), -L, and -l read the installed database and need the package name. In dpkg -l output, ii means installed, rc means removed with config files left, and un means not installed."
+ }],
+ ["lab", {
+  "title": "Lab 4: Install a local .deb and list its files",
+  "scenario": "The offline host has no repository access, so the approved sl package must be installed from the file.",
+  "task": "Install the package file with dpkg, confirm the status, and list the files it installed.",
+  "deliverable": "reports/sl-installed.txt.",
+  "steps": [
+   "sudo dpkg -i debs/sl_*.deb",
+   "dpkg -s sl | grep -E '^(Status|Version)' > reports/sl-installed.txt",
+   "dpkg -L sl >> reports/sl-installed.txt",
+   "Optional: run /usr/games/sl to see the steam locomotive, then press Ctrl+C if you want to stop it."
+  ],
+  "validation": "grep 'install ok installed' reports/sl-installed.txt and grep /usr/games/sl reports/sl-installed.txt both match.",
+  "trap": "dpkg -i does not download missing dependencies. If they are missing, the package is left unconfigured until you run sudo apt-get install -f. sudo apt install ./file.deb installs a local file and resolves dependencies in one step."
+ }],
+ ["h2", "Intermediate Labs: Querying, Building, and Removing Packages"],
+ ["lab", {
+  "title": "Lab 5: Find which package owns a file",
+  "scenario": "An auditor found three files and wants to know which package each one belongs to, including one program that is not installed.",
+  "task": "Use dpkg -S for installed files and apt-file for a file in a package you do not have.",
+  "deliverable": "reports/file-owners.txt.",
+  "steps": [
+   "dpkg -S /usr/games/sl > reports/file-owners.txt",
+   "dpkg -S /usr/bin/apt >> reports/file-owners.txt",
+   "dpkg -S /etc/crontab >> reports/file-owners.txt 2>&1",
+   "apt-file search /usr/games/cowsay >> reports/file-owners.txt",
+   "apt-file list tree | head -5 >> reports/file-owners.txt"
+  ],
+  "validation": "cat reports/file-owners.txt shows sl, apt, and cron as owners, and cowsay as the package that would provide /usr/games/cowsay.",
+  "trap": "dpkg -S only searches installed packages; apt-file searches the whole repository after apt-file update. On merged-/usr systems some files are registered under /bin, so dpkg -S /usr/bin/NAME can fail while dpkg -S bin/NAME finds it."
+ }],
+ ["lab", {
+  "title": "Lab 6: Verify installed files and audit the package database",
+  "scenario": "After a disk scare, the security team asks you to prove that installed package files still match the package database and that no package is half-installed.",
+  "task": "Verify one package, verify all packages, and run an audit.",
+  "deliverable": "reports/verify.txt.",
+  "steps": [
+   "sudo dpkg -V sl > reports/verify.txt 2>&1; echo \"sl verify exit $?\" >> reports/verify.txt",
+   "sudo dpkg -V >> reports/verify.txt 2>&1",
+   "sudo dpkg -C >> reports/verify.txt 2>&1; echo \"audit exit $?\" >> reports/verify.txt",
+   "apt-get check >> reports/verify.txt 2>&1"
+  ],
+  "validation": "grep -E 'exit' reports/verify.txt shows exit 0 for both. Any lines like ??5?????? c /etc/... are config files an admin changed, which is normal.",
+  "trap": "No output from dpkg -V or dpkg -C means all is well. In dpkg -V output, 5 means the checksum changed and c marks a config file. dpkg -C is the same as dpkg --audit."
+ }],
+ ["lab", {
+  "title": "Lab 7: Build and inspect your own package",
+  "scenario": "The team wants to ship a small notice script to every desktop as a proper package so it can be tracked and removed cleanly.",
+  "task": "Build lab-notice from the files in samples/lab-notice and inspect the result.",
+  "deliverable": "debs/lab-notice_1.0-1_all.deb and reports/lab-notice-info.txt.",
+  "steps": [
+   "dpkg-deb --root-owner-group --build samples/lab-notice debs/lab-notice_1.0-1_all.deb",
+   "dpkg-deb -I debs/lab-notice_1.0-1_all.deb > reports/lab-notice-info.txt",
+   "dpkg-deb -c debs/lab-notice_1.0-1_all.deb >> reports/lab-notice-info.txt",
+   "mkdir -p reports/extracted && dpkg-deb -x debs/lab-notice_1.0-1_all.deb reports/extracted && find reports/extracted -type f >> reports/lab-notice-info.txt"
+  ],
+  "validation": "grep -E 'Depends: cowsay|conffiles|lab-notice.conf' reports/lab-notice-info.txt shows the dependency, the conffiles entry, and the config file.",
+  "trap": "dpkg-deb -x extracts the files without installing them or touching the database. The DEBIAN/conffiles list is what makes dpkg keep /etc/lab-notice.conf on remove and ask before overwriting local changes on upgrade."
+ }],
+ ["lab", {
+  "title": "Lab 8: Recover from a failed dependency",
+  "scenario": "A colleague installed lab-notice with dpkg on a desktop that did not have cowsay, and now apt complains about broken packages.",
+  "task": "Reproduce the failure, see the half-configured state, and fix it with apt-get.",
+  "deliverable": "reports/dependency-fix.txt.",
+  "steps": [
+   "dpkg -s cowsay > /dev/null 2>&1 && echo 'cowsay already installed: run sudo apt-get remove cowsay first' || echo 'cowsay not installed, continue'",
+   "sudo dpkg -i debs/lab-notice_1.0-1_all.deb 2>&1 | tee reports/dependency-fix.txt",
+   "dpkg -l lab-notice | tail -1 >> reports/dependency-fix.txt",
+   "sudo apt-get install -f",
+   "dpkg -l lab-notice cowsay | tail -2 >> reports/dependency-fix.txt; lab-notice"
+  ],
+  "validation": "cat reports/dependency-fix.txt shows dependency problems, then iU (unpacked, not configured), then ii for both lab-notice and cowsay. lab-notice prints the cow with the maintenance message.",
+  "trap": "apt-get install -f (fix broken) installs the missing dependencies and finishes configuring the package. Without it, apt refuses most other installs until the problem is fixed."
+ }],
+ ["lab", {
+  "title": "Lab 9: Remove compared with purge",
+  "scenario": "lab-notice is being retired. First you remove it but keep the local config in case it comes back, then the owner asks for a complete cleanup.",
+  "task": "Change the config, remove the package, show the leftover config, then purge it.",
+  "deliverable": "reports/remove-vs-purge.txt.",
+  "steps": [
+   "sudo sed -i 's/22:00/23:00/' /etc/lab-notice.conf",
+   "sudo dpkg -r lab-notice; dpkg -l lab-notice | tail -1 > reports/remove-vs-purge.txt; ls -l /etc/lab-notice.conf >> reports/remove-vs-purge.txt",
+   "sudo dpkg -P lab-notice; dpkg -l lab-notice >> reports/remove-vs-purge.txt 2>&1; ls -l /etc/lab-notice.conf >> reports/remove-vs-purge.txt 2>&1"
+  ],
+  "validation": "cat reports/remove-vs-purge.txt shows rc and the config file still present after -r, then no installed package and No such file or directory after -P.",
+  "trap": "dpkg -r (--remove) keeps config files and dpkg -P (--purge) deletes them. apt-get remove and apt-get purge do the same. Neither dpkg -r nor dpkg -P removes dependencies such as cowsay."
+ }],
+ ["lab", {
+  "title": "Lab 10: Rerun a package's setup questions with dpkg-reconfigure",
+  "scenario": "A user says the time zone was set wrong during install. Before you change anything, you show how the package's setup questions can be asked again without reinstalling.",
+  "task": "Record the current answers, rerun the tzdata questions choosing your current zone, and prove nothing changed.",
+  "deliverable": "reports/reconfigure.txt.",
+  "steps": [
+   "timedatectl show -p Timezone > reports/reconfigure.txt; sudo debconf-show tzdata >> reports/reconfigure.txt",
+   "sudo dpkg-reconfigure tzdata, then choose the same area and city you already use.",
+   "timedatectl show -p Timezone >> reports/reconfigure.txt"
+  ],
+  "validation": "grep Timezone reports/reconfigure.txt shows the same value before and after.",
+  "trap": "dpkg-reconfigure reruns the debconf questions of an installed package, so you do not need to purge and reinstall. Other common examples are locales, keyboard-configuration, and console-setup."
+ }],
+ ["h2", "Advanced Labs: Repositories and APT"],
+ ["lab", {
+  "title": "Lab 11: Document the repositories this system uses",
+  "scenario": "A firewall change is planned, and the network team needs every repository address this desktop downloads packages from.",
+  "task": "Read the repository files, refresh the package lists, and decode the practice sources.list.",
+  "deliverable": "reports/repositories.txt.",
+  "steps": [
+   "cat /etc/apt/sources.list > reports/repositories.txt; ls /etc/apt/sources.list.d >> reports/repositories.txt",
+   "grep -rhE '^(deb|URIs|Suites|Components)' /etc/apt/sources.list /etc/apt/sources.list.d/ >> reports/repositories.txt",
+   "sudo apt-get update 2>&1 | grep -E '^(Hit|Get)' >> reports/repositories.txt",
+   "sed 's/\\[[^]]*\\] //' samples/sources.list | awk '/^deb/ {c=\"\"; for (i=4; i<=NF; i++) c=c\" \"$i; print \"type=\"$1, \"uri=\"$2, \"suite=\"$3, \"components:\"c}' >> reports/repositories.txt"
+  ],
+  "validation": "grep -c http reports/repositories.txt is greater than 5, and the file names the Mint and Ubuntu repositories.",
+  "trap": "Each line is: deb or deb-src, optional [options], the URI, the suite (release), then one or more components. On Mint, /etc/apt/sources.list is usually empty and the real list is /etc/apt/sources.list.d/official-package-repositories.list. Newer files may use the multi-line .sources format."
+ }],
+ ["lab", {
+  "title": "Lab 12: Research a package before a request is approved",
+  "scenario": "A user requests tree. The approver wants its description, version, source repository, dependencies, and what depends on it.",
+  "task": "Gather the information with apt-cache and compare with apt.",
+  "deliverable": "reports/tree-research.txt.",
+  "steps": [
+   "apt-cache search --names-only '^tree$' > reports/tree-research.txt",
+   "apt-cache show tree | grep -E '^(Package|Version|Depends|Description)' >> reports/tree-research.txt",
+   "apt-cache policy tree >> reports/tree-research.txt",
+   "apt-cache depends tree >> reports/tree-research.txt; apt-cache rdepends tree | head -10 >> reports/tree-research.txt",
+   "apt show tree 2>/dev/null | head -5 >> reports/tree-research.txt"
+  ],
+  "validation": "grep -E 'Candidate|Depends: libc6' reports/tree-research.txt shows the candidate version and the libc6 dependency.",
+  "trap": "apt-cache only reads the local package lists, so it needs no sudo but is only as current as your last apt-get update. apt-cache showpkg gives reverse dependencies and versions in a rawer format. apt prints a warning that its output is not stable for scripts."
+ }],
+ ["lab", {
+  "title": "Lab 13: Fulfill, then roll back a software request",
+  "scenario": "A ticket asks for tree and cowsay on this desktop for a training day. After the training they must be removed, along with anything installed only for them.",
+  "task": "Simulate the install, install the packages, then remove and purge them and clean up.",
+  "deliverable": "reports/request-rollback.txt.",
+  "steps": [
+   "apt-get install -s $(cat samples/requested-packages.txt) > reports/request-rollback.txt",
+   "sudo apt-get install -y $(cat samples/requested-packages.txt); apt list --installed tree cowsay sl >> reports/request-rollback.txt 2>/dev/null",
+   "sudo apt-get remove -y tree; sudo apt-get purge -y cowsay sl; sudo apt-get autoremove -y",
+   "ls /var/cache/apt/archives/*.deb 2>/dev/null | wc -l >> reports/request-rollback.txt; sudo apt-get clean; ls /var/cache/apt/archives/*.deb 2>/dev/null | wc -l >> reports/request-rollback.txt",
+   "dpkg -l tree cowsay sl >> reports/request-rollback.txt 2>&1"
+  ],
+  "validation": "grep -c '^Inst' reports/request-rollback.txt is at least 1 (cowsay may already be installed from Lab 8), and the final dpkg -l lines show rc or un for tree and un or no entry for cowsay and sl.",
+  "trap": "-s (simulate) shows what would happen without changing anything. autoremove removes dependencies that were installed automatically and are no longer needed. clean empties the downloaded package cache in /var/cache/apt/archives; autoclean only removes files that can no longer be downloaded."
+ }],
+ ["lab", {
+  "title": "Lab 14: Plan a patch window",
+  "scenario": "Your manager asks how many packages would be updated tonight, and whether a plain upgrade would hold any back.",
+  "task": "List pending updates and compare what upgrade and dist-upgrade would do, without installing anything.",
+  "deliverable": "reports/patch-plan.txt.",
+  "steps": [
+   "sudo apt-get update",
+   "apt list --upgradable 2>/dev/null > reports/patch-plan.txt",
+   "echo \"upgrade: $(apt-get -s upgrade | grep -c '^Inst')\" >> reports/patch-plan.txt",
+   "echo \"dist-upgrade: $(apt-get -s dist-upgrade | grep -c '^Inst')\" >> reports/patch-plan.txt",
+   "apt-get -s upgrade | grep -A3 'kept back' >> reports/patch-plan.txt"
+  ],
+  "validation": "grep -E '^(upgrade|dist-upgrade):' reports/patch-plan.txt shows two counts. dist-upgrade is equal to or larger than upgrade.",
+  "trap": "update refreshes the package lists and installs nothing. upgrade never installs new packages or removes old ones, so it holds back updates that need them; dist-upgrade (apt full-upgrade) can do both. Applying the updates for real is optional on your VM."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+  "Confusing update with upgrade. apt-get update refreshes package lists; apt-get upgrade installs newer versions.",
+  "Expecting dpkg to download or resolve dependencies. Only apt-get and apt do that; fix a failed dpkg -i with apt-get install -f.",
+  "Mixing up remove and purge. dpkg -r and apt-get remove keep config files; dpkg -P and apt-get purge delete them.",
+  "Giving dpkg the wrong argument. -i, -c, and -I take a .deb file; -r, -P, -s, -L, and -V take a package name.",
+  "Mixing up -L and -S. dpkg -L lists the files in a package; dpkg -S finds the package that owns a file.",
+  "Expecting dpkg -S to find files in packages you have not installed. Use apt-file search after apt-file update.",
+  "Forgetting dpkg -l status letters. ii is installed, rc is removed with config left, and iU is unpacked but not configured.",
+  "Confusing upgrade with dist-upgrade. Only dist-upgrade (or apt full-upgrade) may add or remove packages to complete an update.",
+  "Reinstalling to redo setup questions. dpkg-reconfigure reruns them on an installed package.",
+  "Mixing up the sources.list fields. The order is type, options, URI, suite, then components; deb-src lines are for source packages.",
+  "Forgetting where downloaded packages are cached. /var/cache/apt/archives; apt-get clean empties it.",
+  "Using sudo for apt-cache. apt-cache only reads data and needs no root; install, remove, purge, update, and upgrade do.",
+  "Confusing Debian and Red Hat file names. name_version-revision_arch.deb with all, against name-version-release.arch.rpm with noarch.",
+  "Forgetting that dpkg -V and dpkg -C print nothing when all is well."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes. Use only your Linux Mint VM and the files in ~/lpic1-section20. Rerun Steps 3 and 4 of the Lab Setup first so you start from fresh sample files, and remove sl, tree, cowsay, and lab-notice if they are still installed."],
+ ["numbered", [
+  "Download the sl package file without installing it, and record its version and architecture from the file name and from the package itself.",
+  "List the dependencies and the files of the sl package file before installing it.",
+  "Install sl from the file with dpkg and prove it is installed.",
+  "Name the package that owns /usr/bin/apt and the package that would provide /usr/games/cowsay.",
+  "Build lab-notice, install it with dpkg on a system without cowsay, and repair the broken state with apt-get.",
+  "Remove lab-notice so that its config file stays, prove it, then purge it and prove the config file is gone.",
+  "List every repository line this system uses and explain each field of one line.",
+  "Report how many packages upgrade and dist-upgrade would each install, without changing anything."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each file, write a short sentence explaining what it proves, and finish by purging the packages you installed."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+  "Help desk request: “A user says the tree command is missing. Install it from the repositories and prove it worked.”",
+  "Auditor request: “Which package put /etc/crontab on this machine?”",
+  "Server team request: “We have a .deb on a USB stick for a host with no internet. Install it, and tell us how you would handle missing dependencies.”",
+  "Security request: “Remove the cowsay package and make sure none of its config files are left behind.”",
+  "Network team request: “List every repository address this system downloads packages from.”",
+  "Manager request: “Before tonight's patching, tell me what will be upgraded and whether anything will be held back. Don't change anything yet.”",
+  "User request: “The setup questions for a package were answered wrong during install. Can you redo them without reinstalling?”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+  "I can explain binary and source packages, dependencies, repositories, and low-level and high-level package tools.",
+  "I can decode a .deb file name and compare it with an .rpm file name.",
+  "I can inspect a package file with dpkg -I and dpkg -c, and extract it with dpkg-deb -x.",
+  "I can install a local package with dpkg -i and repair missing dependencies with apt-get install -f.",
+  "I can check a package with dpkg -s, list packages with dpkg -l, and read the status letters.",
+  "I can list a package's files with dpkg -L and find a file's owner with dpkg -S and apt-file search.",
+  "I can verify installed files with dpkg -V and audit the database with dpkg -C.",
+  "I can explain and demonstrate the difference between remove and purge.",
+  "I can rerun a package's setup questions with dpkg-reconfigure.",
+  "I can read /etc/apt/sources.list and the files in /etc/apt/sources.list.d, and explain each field.",
+  "I can use apt-cache search, show, depends, rdepends, and policy, and the apt equivalents.",
+  "I can use apt-get update, upgrade, dist-upgrade, install, remove, purge, autoremove, and clean, and simulate any of them with -s."
+ ], 4]
+]

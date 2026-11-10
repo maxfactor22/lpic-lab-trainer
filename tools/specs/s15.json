@@ -1,0 +1,286 @@
+[
+ ["h1", "LPIC-1 Section 15 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objectives 104.1 and 104.3: Create MBR and GPT partitions with fdisk, gdisk and parted, make filesystems and swap, and mount them by device, UUID and label, using disk images attached as loop devices."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like a storage request from a team: a new data disk for web01, a database volume for db01, a boot partition for a UEFI build. Read the scenario, make exactly the partitions, filesystems or mounts it asks for, and prove the result from the command line."],
+ ["p", "Partitioning and formatting erase data, so nothing in this workbook touches your VM's real disk. Lab Setup creates three image files and attaches them as loop devices, and every lab works on those. The loop devices behave like real disks: fdisk, gdisk, parted, mkfs, mkswap, mount and blkid all work on them. Lab 14 detaches them again. If you are ever unsure which device a command will touch, run echo $MBR $GPT $PRT and lsblk first."],
+ ["p", "You will also look at /etc/fstab, but you will never edit it. Lab 13 works on a copy and tests it with findmnt --verify and mount --fake, which change nothing."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Install the partitioning and filesystem tools. Most are already on Mint; apt will just report those as the newest version:"],
+ ["p", "sudo apt install fdisk gdisk parted xfsprogs dosfstools exfatprogs"],
+ ["p", "Step 2: Create the practice workspace and the mount points:"],
+ ["p", "mkdir -p ~/lpic1-section15/{reports,images,configs,mnt/web,mnt/db}"],
+ ["p", "cd ~/lpic1-section15"],
+ ["p", "Step 3: Create three blank disk images. They are sparse, so they use almost no real space until you write to them:"],
+ ["p", "rm -f images/*.img; truncate -s 1G images/mbr.img; truncate -s 1G images/gpt.img; truncate -s 512M images/parted.img"],
+ ["p", "Step 4: Create a sample fstab to read in Lab 13:"],
+ ["p", "printf '# <file system>                           <mount point>  <type>   <options>              <dump> <pass>\\nUUID=3f1c2a7e-0d5b-4c11-9a51-2b7f1e9c0a11  /              ext4     errors=remount-ro      0      1\\nUUID=8C21-4F0A                             /boot/efi      vfat     umask=0077             0      1\\nLABEL=dbdata                               /srv/db        xfs      defaults,noatime       0      2\\n/dev/sdb1                                  /srv/web       ext4     defaults               0      2\\n/swapfile                                  none           swap     sw                     0      0\\n/dev/sr0                                   /media/cdrom   iso9660  ro,user,noauto         0      0\\n' > configs/fstab.sample"],
+ ["p", "Step 5: Record your VM's main disk name, then attach the three images as loop devices with partition scanning turned on (-P). Each variable holds the loop device for one image:"],
+ ["p", "DISK=$(lsblk -dno NAME,TYPE | awk '$2==\"disk\"{print $1; exit}'); echo $DISK"],
+ ["p", "sudo -v; MBR=$(sudo losetup -fP --show images/mbr.img); GPT=$(sudo losetup -fP --show images/gpt.img); PRT=$(sudo losetup -fP --show images/parted.img); echo $MBR $GPT $PRT | tee reports/loop-devices.txt"],
+ ["p", "Step 6: If you open a new terminal, cd ~/lpic1-section15 and reload the variables instead of attaching the images again:"],
+ ["p", "DISK=$(lsblk -dno NAME,TYPE | awk '$2==\"disk\"{print $1; exit}'); MBR=$(losetup -j images/mbr.img | cut -d: -f1); GPT=$(losetup -j images/gpt.img | cut -d: -f1); PRT=$(losetup -j images/parted.img | cut -d: -f1); echo $MBR $GPT $PRT"],
+ ["p", "Validation check: Run losetup -l | grep lpic1-section15 and confirm three loop devices point at your three images. Run lsblk $MBR $GPT $PRT and confirm three loop disks of 1G, 1G and 512M with no partitions. To start over at any point, run Lab 14, then Steps 3 and 5 again."],
+ ["h2", "Commands to Memorize"],
+ ["p", "cat /proc/partitions, lsblk, lsblk -f, fdisk, fdisk -l, fdisk keys m n p e t l w q, gdisk, gdisk -l, gdisk keys ? n p i L w q, parted, parted -l, parted print, mklabel msdos, mklabel gpt, mkpart, set N esp on, unit MiB, partprobe, mkfs -t ext4, mkfs.ext4, mkfs.xfs, mkfs.vfat, mkfs.exfat, mkfs -L, mkswap, swapon, swapon --show, swapoff, free -h, /proc/filesystems, blkid, e2label, /dev/disk/by-uuid, /dev/disk/by-label, mount, mount -t, mount -o ro, mount -o remount,rw, mount UUID=, mount LABEL=, umount, findmnt, /etc/fstab, defaults, auto, noauto, user, nouser, rw, ro, mount -a, findmnt --verify, losetup -fP --show and losetup -d."],
+ ["h2", "Memory hook"],
+ ["p", "Remember the order with T-P-F-M: Table, Partition, Filesystem, Mount. First the disk gets a partition table (MBR or GPT). Then you cut partitions with fdisk, gdisk or parted. Then mkfs or mkswap puts a filesystem or swap signature in a partition. Finally mount, swapon or /etc/fstab makes it usable. Every request in this section is one or more of those four steps, and lsblk -f shows you which step a device has reached."],
+ ["h2", "Beginner Labs: Partition Tables and Inventory"],
+ ["lab", {
+  "title": "Lab 1: Take a storage inventory before any change",
+  "scenario": "Change STOR-2041 adds three new disks to app02. The change process requires a record of the partitions the kernel knows about before you touch anything.",
+  "task": "Save the kernel's partition list and the lsblk tree, and confirm the three new disks have no partitions.",
+  "deliverable": "reports/partitions-before.txt",
+  "steps": [
+   "cat /proc/partitions > reports/partitions-before.txt",
+   "lsblk >> reports/partitions-before.txt",
+   "lsblk $MBR $GPT $PRT >> reports/partitions-before.txt"
+  ],
+  "validation": "grep -c loop reports/partitions-before.txt returns at least 3, and the last lsblk shows each loop disk with no child partitions.",
+  "trap": "/proc/partitions shows what the kernel currently has in memory, in 1 KiB blocks. A partition written to disk by a tool the kernel was not told about will not appear here until the table is reread."
+ }],
+ ["lab", {
+  "title": "Lab 2: Choose MBR or GPT for each request",
+  "scenario": "Three requests arrive at once: a 4 TB data disk for db01, a small disk that must boot on an old BIOS-only server and needs six partitions, and a disk for a new UEFI build. You must pick a partition table for each and check what your own VM uses.",
+  "task": "Check the partition table on the VM's disk and on the blank images, then write your decision for each request.",
+  "deliverable": "reports/table-choice.txt",
+  "steps": [
+   "sudo parted -l 2>&1 | grep -E '^(Model|Disk /dev|Partition Table|Error)' > reports/table-choice.txt",
+   "sudo fdisk -l /dev/$DISK | grep -i 'disklabel type' >> reports/table-choice.txt",
+   "nano reports/table-choice.txt and add one line per request with your choice and reason. Hint: MBR tops out near 2 TB (2 TiB) and four primary partitions, so six partitions need an extended partition with logical partitions inside it. GPT has no partition types, allows 128 partitions by default, keeps a backup copy of its table at the end of the disk, and is required for UEFI boot."
+  ],
+  "validation": "grep -c 'Partition Table' reports/table-choice.txt returns at least 1, and the blank images show unrecognised disk label or Partition Table: unknown.",
+  "trap": "fdisk calls an MBR table dos. On GPT disks, sector 0 holds a protective MBR so older tools do not treat the disk as empty. Saying GPT partition table is redundant because the T already stands for table."
+ }],
+ ["h2", "Intermediate Labs: Creating Partitions and Filesystems"],
+ ["lab", {
+  "title": "Lab 3: Build an MBR layout with fdisk",
+  "scenario": "The old BIOS server's disk needs six partitions: data, swap, a spare, and three more for logs and transfers. You are using the MBR image to build and check the layout.",
+  "task": "Create three primary partitions, an extended partition with the rest of the disk, and two logical partitions inside it. Set partition 2 to the Linux swap type.",
+  "deliverable": "reports/mbr-layout.txt",
+  "steps": [
+   "sudo fdisk $MBR",
+   "Press m to read the help. Type n, Enter (primary), Enter (number 1), Enter (first sector), +300M. Type n, Enter, Enter, Enter, +100M. Type t, 2, then 82 to set partition 2 to Linux swap. Type n, Enter, Enter, Enter, +100M.",
+   "Type n, then e for extended (fdisk picks number 4 itself), and press Enter twice to give it the rest of the disk. Type n, Enter, +250M for logical partition 5, then n, Enter, Enter for logical partition 6. Type p to review and w to write.",
+   "sudo fdisk -l $MBR > reports/mbr-layout.txt"
+  ],
+  "validation": "grep -c \"^${MBR}p\" reports/mbr-layout.txt returns 6, and the list shows Extended for partition 4 and Linux swap / Solaris for partition 2.",
+  "trap": "Primary partitions use numbers 1 to 4; logical partitions always start at 5, even if only one primary exists. The extended partition is only a container for logical partitions and is never formatted. Nothing is saved until you press w; q quits without writing."
+ }],
+ ["lab", {
+  "title": "Lab 4: Build a GPT layout with gdisk",
+  "scenario": "db01's new data disk needs a GPT table with a database partition, a log partition and a swap partition.",
+  "task": "Create three GPT partitions with gdisk, set the swap type code, inspect one partition, and write the table.",
+  "deliverable": "reports/gpt-layout.txt",
+  "steps": [
+   "sudo gdisk $GPT",
+   "Type ? to read the help. Type n, Enter (number 1), Enter (first sector), +400M, Enter (type 8300 Linux filesystem). Type n, Enter, Enter, +200M, Enter. Type n, Enter, Enter, +128M, then 8200 for Linux swap. Type L and look up a few type codes.",
+   "Type p to print the table, i then 1 to show partition 1's GUIDs, then w and Y to write.",
+   "sudo gdisk -l $GPT > reports/gpt-layout.txt"
+  ],
+  "validation": "grep -E '8300|8200' reports/gpt-layout.txt shows two 8300 lines and one 8200 line, and the file reports GPT: present.",
+  "trap": "gdisk uses ? for help where fdisk uses m. GPT has no primary, extended or logical partitions. Type codes such as 8300 and 8200 are labels only; they do not create a filesystem or swap."
+ }],
+ ["lab", {
+  "title": "Lab 5: Build a UEFI boot layout with parted",
+  "scenario": "A new UEFI build needs a disk with an EFI system partition (ESP) and a data partition. The build team uses parted.",
+  "task": "Create a GPT label, a 256 MiB ESP with the esp flag, and a data partition using the rest of the disk.",
+  "deliverable": "reports/parted-layout.txt",
+  "steps": [
+   "sudo parted $PRT",
+   "Type help, then print (it reports an unrecognised disk label). Type mklabel gpt, then unit MiB. Type mkpart ESP fat32 1 257, then set 1 esp on, then mkpart data ext4 257 100%. Type print to review and quit to leave.",
+   "sudo parted $PRT unit MiB print > reports/parted-layout.txt"
+  ],
+  "validation": "grep -E 'esp|boot' reports/parted-layout.txt shows the flag on partition 1, and the table lists two partitions.",
+  "trap": "parted writes each change as soon as you press Enter; there is no w step and no undo. On a GPT label the first word after mkpart is a partition name; on an msdos label it is the type: primary, extended or logical. Help needs the full word help."
+ }],
+ ["lab", {
+  "title": "Lab 6: Confirm the kernel sees the new partitions",
+  "scenario": "Before formatting, the change checklist asks you to prove the kernel has picked up every new partition.",
+  "task": "Compare the kernel's partition list with lsblk and, if anything is missing, ask the kernel to reread a table.",
+  "deliverable": "reports/partitions-after.txt",
+  "steps": [
+   "grep loop /proc/partitions > reports/partitions-after.txt",
+   "lsblk $MBR $GPT $PRT >> reports/partitions-after.txt",
+   "If a partition is missing, run sudo partprobe $MBR (or the device that is missing one) and repeat the two commands.",
+   "sudo gdisk -l $MBR | head -8 >> reports/partitions-after.txt"
+  ],
+  "validation": "grep -c -E 'loop[0-9]+p[0-9]' reports/partitions-after.txt returns at least 11 (6 MBR, 3 GPT and 2 parted partitions), and the gdisk lines report MBR: MBR only.",
+  "trap": "fdisk, gdisk and parted normally tell the kernel about a new table themselves. If the disk is in use, the kernel may keep the old table until partprobe runs or the system reboots. gdisk -l on an MBR disk only reads; gdisk offers to convert the disk to GPT only in interactive mode when you write."
+ }],
+ ["lab", {
+  "title": "Lab 7: Make ext4 and XFS filesystems",
+  "scenario": "web01 needs its 300 MB data partition formatted as ext4 with the label webdata. db01 needs its database partition as XFS with the label dbdata, and its log partition as ext4.",
+  "task": "Check kernel support, find the available mkfs programs, and format the three partitions using both mkfs forms.",
+  "deliverable": "reports/mkfs.txt",
+  "steps": [
+   "grep -E 'ext4|xfs' /proc/filesystems > reports/mkfs.txt; ls /sbin/mkfs.* >> reports/mkfs.txt",
+   "sudo mkfs -t ext4 -L webdata ${MBR}p1",
+   "sudo mkfs.xfs -L dbdata ${GPT}p1",
+   "sudo mkfs.ext4 -L applogs ${GPT}p2",
+   "lsblk -f $MBR $GPT >> reports/mkfs.txt"
+  ],
+  "validation": "grep -E 'webdata|dbdata|applogs' reports/mkfs.txt shows each label with its filesystem type and a UUID.",
+  "trap": "mkfs -t ext4 and mkfs.ext4 do the same thing; mkfs is a front end that runs mkfs.TYPE. Formatting erases what was there. xfs may be missing from /proc/filesystems until its module loads, which happens automatically on first mount. XFS needs a partition of at least 300 MB."
+ }],
+ ["lab", {
+  "title": "Lab 8: Make FAT and exFAT filesystems",
+  "scenario": "The UEFI build's ESP must be FAT32, and the transfer partition on the MBR disk must be exFAT so Windows and macOS laptops can read it.",
+  "task": "Format the ESP as FAT32 and logical partition 5 as exFAT, then list the filesystem modules that ship with your kernel.",
+  "deliverable": "reports/mkfs-other.txt",
+  "steps": [
+   "sudo mkfs.vfat -F 32 -n ESP ${PRT}p1",
+   "sudo mkfs.exfat -L transfer ${MBR}p5",
+   "lsblk -f ${PRT}p1 ${MBR}p5 > reports/mkfs-other.txt",
+   "ls /lib/modules/$(uname -r)/kernel/fs >> reports/mkfs-other.txt"
+  ],
+  "validation": "grep -E 'vfat|exfat' reports/mkfs-other.txt shows both partitions with their labels.",
+  "trap": "FAT labels are stored in upper case and limited to 11 characters, and FAT UUIDs are short (XXXX-XXXX). An ESP must be FAT. A filesystem whose module exists under /lib/modules but is not in /proc/filesystems can still be used, because the kernel loads it when needed."
+ }],
+ ["lab", {
+  "title": "Lab 9: Create and enable swap",
+  "scenario": "db01 is running short of memory during nightly reports. You are asked to add the 128 MB swap partition, prove it is active, then remove it again until the change is approved.",
+  "task": "Write a swap signature, enable it, prove it is in use, and disable it.",
+  "deliverable": "reports/swap.txt",
+  "steps": [
+   "lsblk -f ${MBR}p2 > reports/swap.txt",
+   "sudo mkswap -L labswap ${GPT}p3",
+   "sudo swapon ${GPT}p3; swapon --show >> reports/swap.txt; free -h >> reports/swap.txt",
+   "sudo swapoff ${GPT}p3; swapon --show >> reports/swap.txt"
+  ],
+  "validation": "grep -c \"${GPT}p3\" reports/swap.txt returns 1: the partition appears while enabled and is gone after swapoff. The first lsblk line shows MBR partition 2 has no FSTYPE yet.",
+  "trap": "Setting a partition type to 82 or 8200 does not make swap; mkswap writes the swap signature. swapon -a enables every swap entry in /etc/fstab. swapon -s is the older form of swapon --show."
+ }],
+ ["h2", "Advanced Labs: Identifying, Mounting and fstab"],
+ ["lab", {
+  "title": "Lab 10: Record UUIDs and labels",
+  "scenario": "The monitoring team wants each new filesystem identified by UUID and label, because device names such as sdb1 can change between boots.",
+  "task": "List UUIDs and labels with blkid and lsblk, check the by-label links, and read a label with e2label.",
+  "deliverable": "reports/ids.txt",
+  "steps": [
+   "sudo blkid ${MBR}p1 ${MBR}p5 ${GPT}p1 ${GPT}p2 ${GPT}p3 ${PRT}p1 > reports/ids.txt",
+   "lsblk -o NAME,FSTYPE,LABEL,UUID $MBR $GPT $PRT >> reports/ids.txt",
+   "ls -l /dev/disk/by-label >> reports/ids.txt",
+   "sudo e2label ${MBR}p1 >> reports/ids.txt; sudo blkid -s UUID -o value ${GPT}p1 >> reports/ids.txt"
+  ],
+  "validation": "grep -c 'UUID=' reports/ids.txt returns at least 6, and the by-label listing shows webdata, dbdata and ESP pointing at loop partitions.",
+  "trap": "The UUID belongs to the filesystem and changes when you run mkfs again. PARTUUID belongs to the GPT partition entry and does not. blkid usually needs sudo to probe a new device; without it you may see cached or no results."
+ }],
+ ["lab", {
+  "title": "Lab 11: Mount and unmount a filesystem",
+  "scenario": "web01's application team needs the new data filesystem mounted so they can check it, then unmounted again before the release.",
+  "task": "Mount the ext4 partition by device, check it, unmount it by mount point, then mount by label and unmount by device.",
+  "deliverable": "reports/mounts.txt",
+  "steps": [
+   "sudo mount -t ext4 ${MBR}p1 mnt/web; ls mnt/web > reports/mounts.txt",
+   "mount | grep lpic1-section15 >> reports/mounts.txt; findmnt $PWD/mnt/web >> reports/mounts.txt",
+   "sudo umount mnt/web",
+   "sudo mount LABEL=webdata mnt/web; findmnt $PWD/mnt/web >> reports/mounts.txt; sudo umount ${MBR}p1",
+   "findmnt $PWD/mnt/web >> reports/mounts.txt || echo 'mnt/web is not mounted' >> reports/mounts.txt",
+   "systemctl list-units --type=mount --no-pager | head -8 >> reports/mounts.txt"
+  ],
+  "validation": "grep -E 'lost\\+found|not mounted' reports/mounts.txt shows lost+found from the first mount and the not mounted line at the end.",
+  "trap": "The command is umount, with no n. You can unmount by mount point or by device. umount fails with target is busy if any shell or program is using the mount point, including a shell whose current directory is inside it. systemd turns each mounted filesystem into a .mount unit, which is why mounts appear in systemctl list-units."
+ }],
+ ["lab", {
+  "title": "Lab 12: Mount read-only for an evidence review",
+  "scenario": "Security wants to look at db01's database filesystem without any risk of changing it, and later the DBA needs write access back.",
+  "task": "Mount the XFS filesystem read-only by UUID, prove writes fail, remount it read-write, prove writes work, and unmount.",
+  "deliverable": "reports/ro-test.txt",
+  "steps": [
+   "sudo mount -o ro UUID=$(sudo blkid -s UUID -o value ${GPT}p1) mnt/db",
+   "sudo touch mnt/db/evidence-check 2> reports/ro-test.txt; findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS $PWD/mnt/db >> reports/ro-test.txt",
+   "sudo mount -o remount,rw mnt/db; sudo touch mnt/db/evidence-check && echo 'write ok after remount' >> reports/ro-test.txt",
+   "sudo umount mnt/db"
+  ],
+  "validation": "cat reports/ro-test.txt shows Read-only file system, an OPTIONS column starting with ro, and the line write ok after remount.",
+  "trap": "mount -U uuid and mount UUID=uuid are equivalent, as are -L label and LABEL=label. remount changes options without unmounting. Even read-only, mounting some filesystems can replay a journal, so for real forensic work use the device's own read-only setting as well."
+ }],
+ ["lab", {
+  "title": "Lab 13: Draft and test fstab entries on a copy",
+  "scenario": "The change for app02 will add the new filesystems to /etc/fstab. Policy says any fstab change must be drafted and tested before it reaches the real file.",
+  "task": "Read the sample fstab, draft entries in a copy of /etc/fstab, and test the copy without mounting anything.",
+  "deliverable": "configs/fstab.test and reports/fstab-verify.txt",
+  "steps": [
+   "grep -v '^#' configs/fstab.sample | column -t",
+   "cp /etc/fstab configs/fstab.test",
+   "echo \"LABEL=webdata  $HOME/lpic1-section15/mnt/web  ext4  defaults,noauto,user  0  2\" >> configs/fstab.test",
+   "echo \"UUID=$(sudo blkid -s UUID -o value ${GPT}p1)  $HOME/lpic1-section15/mnt/db  xfs  defaults  0  2\" >> configs/fstab.test",
+   "echo \"LABEL=labswap  none  swap  sw  0  0\" >> configs/fstab.test",
+   "sudo findmnt --verify --verbose --tab-file configs/fstab.test > reports/fstab-verify.txt 2>&1",
+   "sudo mount -a --fake --verbose -T configs/fstab.test >> reports/fstab-verify.txt 2>&1",
+   "nano reports/fstab-verify.txt and explain the six fields of your new lines: what to mount, where, type, options, dump and fsck pass."
+  ],
+  "validation": "tail -5 configs/fstab.test shows your three lines, grep -E 'errors|Success' reports/fstab-verify.txt reports 0 errors, and findmnt $PWD/mnt/db prints nothing because --fake mounted nothing.",
+  "trap": "defaults means rw, suid, dev, exec, auto, nouser and async. noauto keeps mount -a from mounting the entry at boot, and user lets an ordinary user mount it. The pass field is 1 for the root filesystem, 2 for other filesystems and 0 to skip the check; dump 0 means the old dump backup tool ignores it. A broken /etc/fstab can stop a system from booting, which is why you test a copy."
+ }],
+ ["lab", {
+  "title": "Lab 14: Decommission the lab disks",
+  "scenario": "Change STOR-2041 is complete, and the temporary disks must be released cleanly so nothing is left mounted or attached.",
+  "task": "Unmount everything, disable any swap, detach the loop devices and prove nothing is left.",
+  "deliverable": "reports/cleanup.txt",
+  "steps": [
+   "sudo umount mnt/web mnt/db 2>/dev/null; sudo swapoff ${GPT}p3 2>/dev/null",
+   "sudo losetup -d $MBR $GPT $PRT",
+   "losetup -l | grep lpic1-section15 > reports/cleanup.txt || echo 'No lab loop devices attached' > reports/cleanup.txt",
+   "findmnt | grep lpic1-section15 >> reports/cleanup.txt || echo 'No lab mounts' >> reports/cleanup.txt"
+  ],
+  "validation": "cat reports/cleanup.txt shows No lab loop devices attached and No lab mounts.",
+  "trap": "Unmount before you detach. The images keep their partitions and filesystems after detaching, so rerun Step 5 to attach them again, or Steps 3 and 5 to start fresh. On a real disk, sudo wipefs -a removes filesystem and partition table signatures, so check the device name twice before using it."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+  "Forgetting MBR limits: disks and partitions up to about 2 TB, four primary partitions, and logical partitions numbered from 5 inside one extended partition.",
+  "Thinking GPT has primary and logical partitions. It has none of those types and allows 128 partitions by default.",
+  "Mixing up help keys: m in fdisk, ? in gdisk, and the full word help in parted.",
+  "Expecting parted to wait for a w command. parted writes each change immediately.",
+  "Quitting fdisk or gdisk with q and expecting changes to be saved. Only w writes the table.",
+  "Formatting the extended partition. It is only a container for logical partitions.",
+  "Thinking a partition type code (82, 8200, 8300) creates a filesystem or swap. mkfs and mkswap do that.",
+  "Treating mkfs -t ext4 and mkfs.ext4 as different. They do the same thing.",
+  "Forgetting that mkfs gives the filesystem a new UUID, so fstab entries that use the old UUID stop working.",
+  "Spelling umount as unmount, or expecting umount to work while a shell is inside the mount point.",
+  "Swapping fstab fields. The order is device, mount point, type, options, dump, pass.",
+  "Using pass 1 for every filesystem. Only the root filesystem should be 1; others use 2, and 0 skips the check.",
+  "Forgetting what noauto and user do. noauto is skipped by mount -a; user lets ordinary users mount the filesystem.",
+  "Editing /etc/fstab without testing. Check a copy with findmnt --verify or mount -a --fake before it reaches the real file."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes, using only your Linux Mint VM and the files in ~/lpic1-section15. Run Lab 14 first, then Steps 3 and 5 of the Lab Setup so you start with three blank images, and save each answer under reports/ with a name that starts with challenge-."],
+ ["numbered", [
+  "On the MBR image, create two primary partitions, an extended partition and two logical partitions, and prove the numbering.",
+  "On the GPT image, create a 400 MB Linux partition and a 128 MB swap partition with gdisk.",
+  "On the parted image, create a GPT label and a FAT32 EFI system partition with the esp flag set.",
+  "Format the first MBR partition as ext4 with the label webdata, and the first GPT partition as XFS with the label dbdata.",
+  "Enable the swap partition, prove it is active with two different commands, then disable it.",
+  "Mount dbdata by UUID read-only, prove that writes fail, and unmount it by device name.",
+  "Draft fstab entries for webdata (by label, not mounted at boot) and dbdata (by UUID) in a copy of /etc/fstab, and prove the copy has no errors.",
+  "Unmount everything and detach all three loop devices."
+ ]],
+ ["p", "Your final handoff is the reports directory and configs/fstab.test. For each file, write one sentence explaining what it proves, as if you were closing change STOR-2041."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+  "Storage team request: “db01's new disk is 4 TB. Which partition table should it get, and which tool would you use to create it?”",
+  "Project lead request: “The legacy server needs six partitions on an MBR disk. Explain how the partitions will be numbered.”",
+  "Build team request: “The new UEFI image needs an EFI system partition. Create it and show me the flag is set.”",
+  "DBA request: “Format the database partition as XFS with the label dbdata and tell me its UUID.”",
+  "Operations request: “db01 is short on memory. Turn on the spare swap partition now and show me it is in use.”",
+  "Security request: “Mount the database filesystem so nothing can write to it, and prove it.”",
+  "Change manager request: “Add the new data filesystem to fstab by UUID, but prove the file is valid before anyone reboots.”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+  "I can explain the differences between MBR and GPT, including size limits, partition counts and partition types.",
+  "I can attach a disk image with losetup -fP --show and detach it with losetup -d.",
+  "I can create primary, extended and logical partitions with fdisk and set a partition type with t.",
+  "I can create GPT partitions with gdisk, set type codes such as 8300 and 8200, and write the table with w.",
+  "I can create a partition table and partitions with parted, set the esp flag, and explain that parted writes immediately.",
+  "I can confirm new partitions in /proc/partitions and lsblk and use partprobe when the kernel has not seen them.",
+  "I can make ext4, XFS, FAT32 and exFAT filesystems with mkfs -t and mkfs.TYPE and give them labels.",
+  "I can check kernel filesystem support in /proc/filesystems and /lib/modules.",
+  "I can create, enable, check and disable swap with mkswap, swapon, swapon --show, free and swapoff.",
+  "I can find UUIDs and labels with blkid, lsblk -f and /dev/disk/by-label.",
+  "I can mount by device, UUID and label, mount read-only, remount read-write and unmount by device or mount point.",
+  "I can explain every field and the common options of /etc/fstab, and test a draft with findmnt --verify and mount -a --fake."
+ ], 4]
+]

@@ -1,0 +1,425 @@
+[
+ [
+  "h1",
+  "LPIC-1 Section 12 Scenario-Based IT Engineering Lab Guide"
+ ],
+ [
+  "sub",
+  "Objective 103.1: Work on the command line, focusing on shell and environment variables, PATH, quoting, exporting, and the startup files that set your environment, using realistic support and session-setup tasks."
+ ],
+ [
+  "h2",
+  "How to use this workbook"
+ ],
+ [
+  "p",
+  "Treat each lab like a support ticket or a session-setup request, not a typing drill. Read the scenario, decide whether the setting is needed only now, in child programs too, or in every future session, and prove the result with echo, env, printenv, or a child shell."
+ ],
+ [
+  "p",
+  "Use a Linux Mint VM and stay inside ~/lpic1-section12. Almost everything here changes only your current shell and disappears when you close the terminal. The one lab that edits ~/.bashrc backs it up first and removes its own line at the end. The labs only read /etc/profile and the other system startup files."
+ ],
+ [
+  "h2",
+  "Lab Setup"
+ ],
+ [
+  "p",
+  "Step 1: Create the practice workspace:"
+ ],
+ [
+  "p",
+  "mkdir -p ~/lpic1-section12/{bin,configs,reports}"
+ ],
+ [
+  "p",
+  "cd ~/lpic1-section12"
+ ],
+ [
+  "p",
+  "Step 2: Create a small tool that lives outside your PATH, and a script that reports what a child process can see:"
+ ],
+ [
+  "p",
+  "printf '#!/bin/bash\\necho \"Disk report for $(hostname)\"\\ndf -h / | tail -1\\n' > bin/diskreport"
+ ],
+ [
+  "p",
+  "printf '#!/bin/bash\\necho \"child sees TICKET=[$TICKET] SHLVL=$SHLVL\"\\n' > bin/show-ticket.sh"
+ ],
+ [
+  "p",
+  "chmod +x bin/diskreport bin/show-ticket.sh"
+ ],
+ [
+  "p",
+  "Step 3: Create a settings file for app02 and a test startup file for the team:"
+ ],
+ [
+  "p",
+  "printf 'export APP_ENV=staging\\nAPP_REGION=us-east\\nexport APP_LOG=/var/log/app02\\n' > configs/app02.env"
+ ],
+ [
+  "p",
+  "echo 'export LAB_TEAM=netops' > configs/team-bashrc"
+ ],
+ [
+  "p",
+  "echo 'PS1=\"[lab \\u@\\h \\W]\\$ \"' >> configs/team-bashrc"
+ ],
+ [
+  "p",
+  "Validation check: Run ls -l bin configs and cat configs/*. Both programs in bin should be executable, and team-bashrc should contain the line PS1=\"[lab \\u@\\h \\W]\\$ \" exactly as shown. If a lab goes wrong, close the terminal, open a new one, cd back to the folder, and rerun Steps 2 and 3."
+ ],
+ [
+  "h2",
+  "Commands to Memorize"
+ ],
+ [
+  "p",
+  "echo $VAR, printenv, printenv VAR, env, env VAR=value command, env -u VAR, env -i, set, set | grep, VAR=value, export, export VAR=value, export -n, export -p, declare -p, unset, bash, exit, $SHLVL, $$, exec, source, . (dot), type, which, uname -a, history, and the variables USER, LOGNAME, HOME, PWD, SHELL, PATH, PS1, PS2, HOSTNAME, UID, GROUPS, BASH_VERSION, HISTFILE, HISTSIZE, HISTFILESIZE, LANG, LC_ALL, TZ, LD_LIBRARY_PATH, EDITOR, and VISUAL. Startup files: /etc/profile, /etc/profile.d/, ~/.bash_profile, ~/.bash_login, ~/.profile, /etc/bash.bashrc, ~/.bashrc, ~/.bash_logout, and /etc/environment."
+ ],
+ [
+  "h2",
+  "Memory hook"
+ ],
+ [
+  "p",
+  "A variable lives in one shell until you export it. NAME=value creates it, $NAME reads it, export hands a copy to every child started afterwards, and unset removes it. A child can never change its parent's variables, which is why you source a settings file instead of running it. Anything you set at the prompt dies with the terminal; to keep it, put it in ~/.bashrc for your interactive shells, or ~/.profile for logins. Double quotes let $ expand; single quotes keep everything literal."
+ ],
+ [
+  "h2",
+  "Beginner Labs: Reading Your Environment"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 1: Capture the environment for a support ticket",
+   "scenario": "A vendor asks for your shell environment and system details to troubleshoot an installer that fails only for you.",
+   "task": "Record the system, a few key variables, and the full exported environment, sorted.",
+   "deliverable": "reports/env-snapshot.txt and reports/env-full.txt.",
+   "steps": [
+    "uname -a > reports/env-snapshot.txt",
+    "echo \"USER=$USER LOGNAME=$LOGNAME HOME=$HOME PWD=$PWD SHELL=$SHELL\" >> reports/env-snapshot.txt",
+    "printenv HOME >> reports/env-snapshot.txt; printenv NO_SUCH_VAR >> reports/env-snapshot.txt; echo \"exit code: $?\" >> reports/env-snapshot.txt",
+    "env | sort > reports/env-full.txt; printenv | wc -l >> reports/env-snapshot.txt"
+   ],
+   "validation": "cat reports/env-snapshot.txt and grep -E '^(HOME|PATH|USER)=' reports/env-full.txt. printenv for a missing variable prints nothing and returns exit code 1.",
+   "trap": "echo needs the dollar sign ($HOME); printenv takes the bare name (printenv HOME). Before sharing an environment dump, read it for tokens or passwords that may be stored in variables."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 2: Check the user, session, and history variables",
+   "scenario": "A user says their command history keeps getting cut short and asks which account and groups their shell thinks it is running as.",
+   "task": "Record the user and group variables, the bash version, and the history settings, and compare them with id.",
+   "deliverable": "reports/session-vars.txt.",
+   "steps": [
+    "echo \"UID=$UID GROUPS=$GROUPS all groups: ${GROUPS[@]}\" > reports/session-vars.txt; id >> reports/session-vars.txt",
+    "echo \"BASH_VERSION=$BASH_VERSION\" >> reports/session-vars.txt",
+    "echo \"HISTFILE=$HISTFILE HISTSIZE=$HISTSIZE HISTFILESIZE=$HISTFILESIZE\" >> reports/session-vars.txt",
+    "ls -l \"$HISTFILE\" >> reports/session-vars.txt; history | tail -3 >> reports/session-vars.txt"
+   ],
+   "validation": "cat reports/session-vars.txt and confirm UID matches uid= in the id line, GROUPS matches gid=, and HISTFILE points to ~/.bash_history.",
+   "trap": "GROUPS is an array: $GROUPS shows only the first entry, and ${GROUPS[@]} shows them all. HISTSIZE limits the commands kept in memory; HISTFILESIZE limits the lines kept in the history file. UID and GROUPS are bash shell variables, so env and printenv do not show them."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 3: Check the host, locale, and time zone variables",
+   "scenario": "A report generated on app02 shows dates in the wrong time zone and odd sorting. The team wants the system's host and locale settings, plus a test in another time zone.",
+   "task": "Record HOSTNAME, the locale variables, and the time in UTC and in another zone without changing the system.",
+   "deliverable": "reports/locale.txt.",
+   "steps": [
+    "echo \"HOSTNAME=$HOSTNAME\" > reports/locale.txt; cat /etc/hostname >> reports/locale.txt",
+    "echo \"LANG=$LANG LC_ALL=[$LC_ALL] TZ=[$TZ] LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]\" >> reports/locale.txt; locale >> reports/locale.txt",
+    "date >> reports/locale.txt; TZ=UTC date >> reports/locale.txt; TZ=Asia/Tokyo date >> reports/locale.txt"
+   ],
+   "validation": "cat reports/locale.txt and confirm the three date lines show different hours, and that LC_ALL, TZ, and LD_LIBRARY_PATH are empty in brackets.",
+   "trap": "LC_ALL overrides LANG and every LC_ setting when it is set. TZ changes the time zone only for the command or session that has it, not for the system. LD_LIBRARY_PATH adds folders where programs look for shared libraries and is usually unset."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 4: Use quoting to control what the shell expands",
+   "scenario": "A colleague's script prints the literal text $HOME in one message and loses the spacing in another. You need to show the team how quoting works.",
+   "task": "Compare double quotes, single quotes, and backslashes, and show how quoting preserves spacing.",
+   "deliverable": "reports/quoting.txt.",
+   "steps": [
+    "echo \"Home is $HOME\" > reports/quoting.txt; echo 'Home is $HOME' >> reports/quoting.txt; echo Home is \\$HOME >> reports/quoting.txt",
+    "echo \"Cost is \\$5 for $USER\" >> reports/quoting.txt; echo \"Today is $(date +%F)\" >> reports/quoting.txt",
+    "MSG='web01    db01'; echo $MSG >> reports/quoting.txt; echo \"$MSG\" >> reports/quoting.txt"
+   ],
+   "validation": "cat reports/quoting.txt. Line 1 shows your home path, lines 2 and 3 show the literal $HOME, line 4 shows $5 and your user name, line 5 shows today's date, and the last two lines show the spaces collapsed and then kept.",
+   "trap": "Double quotes expand $VAR and $(command) but stop word splitting. Single quotes expand nothing. A backslash protects only the next character. Quote variables by default: \"$VAR\"."
+  }
+ ],
+ [
+  "h2",
+  "Intermediate Labs: Setting, Exporting, and Removing Variables"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 5: Tell a shell variable from an environment variable",
+   "scenario": "A deployment script cannot see SITE even though echo $SITE works at your prompt. You need to prove why.",
+   "task": "Create SITE without export, show where it appears, then export it and check again.",
+   "deliverable": "reports/shell-vs-env.txt.",
+   "steps": [
+    "SITE=web01; echo \"prompt sees: $SITE\" > reports/shell-vs-env.txt",
+    "set | grep '^SITE=' >> reports/shell-vs-env.txt; env | grep -c '^SITE=' >> reports/shell-vs-env.txt; bash -c 'echo \"child sees: [$SITE]\"' >> reports/shell-vs-env.txt",
+    "export SITE; env | grep '^SITE=' >> reports/shell-vs-env.txt; bash -c 'echo \"child sees: [$SITE]\"' >> reports/shell-vs-env.txt",
+    "declare -p SITE >> reports/shell-vs-env.txt"
+   ],
+   "validation": "cat reports/shell-vs-env.txt. Before export, set finds SITE, env counts 0, and the child sees []. After export, env finds it, the child sees [web01], and declare -p shows declare -x.",
+   "trap": "set lists shell variables, environment variables, and functions; env and printenv list only exported variables. There are no spaces around the = sign: SITE = web01 runs a command called SITE."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 6: Export a change ticket number to child shells and scripts",
+   "scenario": "During change CHG-1042 every script you run must log the ticket number. The scripts read it from TICKET.",
+   "task": "Set TICKET, show that a subshell and a script cannot see it, export it, and check again. Then test what happens to an exported prompt.",
+   "deliverable": "reports/export.txt.",
+   "steps": [
+    "TICKET=CHG-1042; bin/show-ticket.sh > reports/export.txt",
+    "export TICKET; bin/show-ticket.sh >> reports/export.txt; export -p | grep TICKET >> reports/export.txt",
+    "echo $SHLVL, then start a subshell by typing bash on its own line. Inside it run: echo \"inside: SHLVL=$SHLVL TICKET=$TICKET\" >> reports/export.txt, then type exit.",
+    "export -n TICKET; bin/show-ticket.sh >> reports/export.txt",
+    "Last, test an exported prompt: export PS1='lab> ', then type bash and notice your normal prompt comes back. Type exit, then close the terminal and open a new one to reset your prompt."
+   ],
+   "validation": "cat reports/export.txt. The script sees [] first, then [CHG-1042] with an SHLVL one higher than your prompt's, the inside line shows the ticket with SHLVL one higher than your prompt's, and after export -n the script sees [] again.",
+   "trap": "export VAR=value, VAR=value; export VAR, and VAR=value then export VAR all do the same thing. On Linux Mint, ~/.bashrc sets PS1 for every new interactive shell, so an exported PS1 is overwritten in the subshell. export -n removes the export flag but keeps the variable."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 7: Remove a variable cleanly with unset",
+   "scenario": "A stale proxy setting is breaking downloads in your session. Setting it to an empty value did not help because the tool checks whether the variable exists at all.",
+   "task": "Show the difference between an empty variable and an unset one.",
+   "deliverable": "reports/unset.txt.",
+   "steps": [
+    "export LAB_PROXY=http://proxy01:3128; env | grep -c '^LAB_PROXY=' > reports/unset.txt",
+    "LAB_PROXY=; env | grep '^LAB_PROXY=' >> reports/unset.txt; declare -p LAB_PROXY >> reports/unset.txt",
+    "unset LAB_PROXY; env | grep -c '^LAB_PROXY=' >> reports/unset.txt; declare -p LAB_PROXY >> reports/unset.txt 2>&1"
+   ],
+   "validation": "cat reports/unset.txt shows 1, then LAB_PROXY= with an empty value still in the environment, then 0 and a not found message after unset.",
+   "trap": "unset takes the bare name: unset LAB_PROXY, not unset $LAB_PROXY, which would try to unset a variable named after the value. An empty variable still exists and is still exported."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 8: Change the environment for a single command",
+   "scenario": "You need to run one command in UTC and one with a clean environment for a vendor test, without changing your own session.",
+   "task": "Use VAR=value command and env to change the environment for one command only.",
+   "deliverable": "reports/one-command.txt.",
+   "steps": [
+    "TZ=UTC date > reports/one-command.txt; echo \"session TZ is still [$TZ]\" >> reports/one-command.txt",
+    "export LAB_COLOR=blue; env LAB_COLOR=red bash -c 'echo \"child: $LAB_COLOR\"' >> reports/one-command.txt; echo \"parent: $LAB_COLOR\" >> reports/one-command.txt",
+    "env -u LAB_COLOR bash -c 'echo \"after -u: [$LAB_COLOR]\"' >> reports/one-command.txt",
+    "env -i /bin/bash -c 'env' >> reports/one-command.txt; unset LAB_COLOR"
+   ],
+   "validation": "cat reports/one-command.txt. The session TZ stays empty, the child sees red while the parent keeps blue, env -u hides it, and env -i leaves only a handful of variables such as PWD and SHLVL.",
+   "trap": "VAR=value command puts VAR in that command's environment only, without export. env with no arguments lists the environment; env with arguments runs a command in a changed copy of it."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 9: Run a tool that is not in the PATH",
+   "scenario": "A teammate dropped a diskreport tool in the lab bin folder. Typing diskreport says command not found, and you need it to work by name for this session.",
+   "task": "Show why it fails, run it by relative and absolute path, then add its folder to PATH for this session.",
+   "deliverable": "reports/path.txt.",
+   "steps": [
+    "echo \"$PATH\" | tr ':' '\\n' > reports/path.txt; diskreport >> reports/path.txt 2>&1",
+    "./bin/diskreport >> reports/path.txt; ~/lpic1-section12/bin/diskreport >> reports/path.txt",
+    "PATH=\"$PATH:$HOME/lpic1-section12/bin\"; diskreport >> reports/path.txt",
+    "which diskreport >> reports/path.txt; type diskreport >> reports/path.txt; type echo cd >> reports/path.txt"
+   ],
+   "validation": "cat reports/path.txt. It lists the PATH folders one per line, shows command not found, then three disk reports, then the full path from which and type, and echo and cd reported as shell builtins.",
+   "trap": "Always keep $PATH in the new value; PATH=/new/folder alone replaces it and breaks almost every command until you close the terminal. Never add . to PATH. type knows about aliases, functions, and builtins; which only searches PATH."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 10: Customize the prompt for a jump-host session",
+   "scenario": "You keep running commands in the wrong window. The team suggests a prompt that shows user, host, and folder, plus a clearer continuation prompt.",
+   "task": "Save your current PS1 and PS2, set new ones, test a continued command, and restore the originals.",
+   "deliverable": "reports/prompt.txt.",
+   "steps": [
+    "echo \"old PS1: $PS1\" > reports/prompt.txt; echo \"old PS2: $PS2\" >> reports/prompt.txt; OLD_PS1=$PS1",
+    "PS1='[\\u@\\h \\W]\\$ '; PS2='continue> '",
+    "Type echo one \\ and press Enter. The continue> prompt appears; type two and press Enter.",
+    "echo \"new PS1: $PS1\" >> reports/prompt.txt; echo \"new PS2: $PS2\" >> reports/prompt.txt; PS1=$OLD_PS1; PS2='> '"
+   ],
+   "validation": "cat reports/prompt.txt shows the old and new values, and your prompt is back to normal.",
+   "trap": "PS1 is the main prompt and PS2 the continuation prompt shown after a trailing backslash or an unfinished quote. \\u is the user, \\h the short host name, \\w the full working folder, and \\W only its last part. Use single quotes so the escapes are stored, not expanded."
+  }
+ ],
+ [
+  "h2",
+  "Advanced Labs: Sourcing, exec, and Startup Files"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 11: Load an application's settings into your shell",
+   "scenario": "The app02 runbook says to load configs/app02.env before running maintenance commands. A teammate ran it as a script and the variables never appeared.",
+   "task": "Run the settings file as a separate bash, then source it, and compare.",
+   "deliverable": "reports/source.txt.",
+   "steps": [
+    "bash configs/app02.env; echo \"after bash: [$APP_ENV] [$APP_REGION]\" > reports/source.txt",
+    "source configs/app02.env; echo \"after source: [$APP_ENV] [$APP_REGION]\" >> reports/source.txt",
+    "bash -c 'echo \"child: [$APP_ENV] [$APP_REGION]\"' >> reports/source.txt",
+    "unset APP_ENV APP_REGION APP_LOG; . configs/app02.env; echo \"after dot: [$APP_LOG]\" >> reports/source.txt; unset APP_ENV APP_REGION APP_LOG"
+   ],
+   "validation": "cat reports/source.txt. After bash both are empty; after source both are set; the child sees APP_ENV but not APP_REGION, because only exported variables pass down; the dot command works like source.",
+   "trap": "Running a file starts a child shell, and a child cannot change its parent's variables. source and . run the file in the current shell. This is how ~/.bashrc and ~/.profile are read."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 12: See exec replace the shell",
+   "scenario": "A wrapper script ends with exec, and a teammate asks why the wrapper's own process disappears from ps when the real program starts.",
+   "task": "Show that exec keeps the same PID and does not return, using child shells so your own terminal stays open.",
+   "deliverable": "reports/exec.txt.",
+   "steps": [
+    "bash -c 'echo \"shell PID $$\"; exec ps -o pid,comm -p $$' > reports/exec.txt",
+    "bash -c 'exec echo \"exec ran\"; echo \"this line never runs\"' >> reports/exec.txt",
+    "echo \"before: SHLVL=$SHLVL\" >> reports/exec.txt; bash, then exec sleep 2. After two seconds you are back in your first shell. Run: echo \"after: SHLVL=$SHLVL\" >> reports/exec.txt"
+   ],
+   "validation": "cat reports/exec.txt. The ps line shows the same PID as the shell, now running ps; exec ran appears but this line never runs does not; and SHLVL is the same before and after.",
+   "trap": "exec replaces the current shell with the command; when the command ends, that shell is gone. Running exec in your main terminal closes it. Don't run exec ls at your own prompt."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 13: Map which startup files a session reads",
+   "scenario": "A user set a variable in ~/.bashrc and says it is missing when they log in over ssh, but present in the desktop terminal. You need to explain login and non-login shells.",
+   "task": "Check which kind of shell you are in, read the startup files that exist, and test a custom startup file without touching ~/.bashrc.",
+   "deliverable": "reports/startup-files.txt.",
+   "steps": [
+    "shopt login_shell > reports/startup-files.txt; bash -l -c 'shopt login_shell' >> reports/startup-files.txt",
+    "ls -ld /etc/profile /etc/profile.d /etc/bash.bashrc /etc/environment ~/.profile ~/.bashrc ~/.bash_profile ~/.bash_login ~/.bash_logout >> reports/startup-files.txt 2>&1",
+    "grep -n 'bashrc' /etc/profile ~/.profile >> reports/startup-files.txt; cat /etc/environment >> reports/startup-files.txt",
+    "bash --rcfile configs/team-bashrc. Notice the [lab ...] prompt, run echo $LAB_TEAM >> reports/startup-files.txt, then exit."
+   ],
+   "validation": "cat reports/startup-files.txt. Your desktop terminal shows login_shell off and bash -l shows on, ~/.bash_profile and ~/.bash_login are usually missing on Mint, ~/.profile sources ~/.bashrc, and netops was recorded from the test shell.",
+   "trap": "A login shell reads /etc/profile, then the first of ~/.bash_profile, ~/.bash_login, or ~/.profile that exists. An interactive non-login shell reads /etc/bash.bashrc and ~/.bashrc. /etc/environment is plain NAME=value lines read at login, not a script, so export and $VAR do not work there."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 14: Make a team variable permanent, then roll it back",
+   "scenario": "Your team wants LAB_TEAM=netops in every new terminal. The change must be easy to reverse and must not damage your existing ~/.bashrc.",
+   "task": "Back up ~/.bashrc, append one marked line, prove a new interactive shell sees it, then remove the line and prove the file is back to its original state.",
+   "deliverable": "reports/bashrc-change.txt.",
+   "steps": [
+    "cp ~/.bashrc reports/bashrc.backup",
+    "echo 'export LAB_TEAM=netops  # lpic1-s12' >> ~/.bashrc; tail -1 ~/.bashrc > reports/bashrc-change.txt",
+    "bash -i -c 'echo \"new shell sees: $LAB_TEAM\"' >> reports/bashrc-change.txt; bash -c 'echo \"non-interactive sees: [$LAB_TEAM]\"' >> reports/bashrc-change.txt",
+    "sed -i '/# lpic1-s12$/d' ~/.bashrc; diff ~/.bashrc reports/bashrc.backup && echo 'bashrc restored' >> reports/bashrc-change.txt",
+    "If diff prints any difference, put the original back with: cp reports/bashrc.backup ~/.bashrc"
+   ],
+   "validation": "cat reports/bashrc-change.txt shows the added line, new shell sees: netops, non-interactive sees: [], and bashrc restored.",
+   "trap": "Mint's ~/.bashrc returns early when the shell is not interactive, so scripts do not see what you put there. Editing ~/.bashrc does not change shells that are already open; open a new terminal or run source ~/.bashrc. EDITOR and VISUAL, from Section 9, are made permanent the same way."
+  }
+ ],
+ [
+  "h2",
+  "Common Exam Traps"
+ ],
+ [
+  "bullets",
+  [
+   "Putting spaces around =. VAR=value works; VAR = value runs a command named VAR.",
+   "Using $ in the wrong place. echo $VAR reads a value, but VAR=, export VAR, unset VAR, and printenv VAR take the bare name.",
+   "Expecting a variable to reach a child without export. Children get only exported variables.",
+   "Expecting a child to change its parent. A script cannot set variables in the shell that ran it; source it instead.",
+   "Confusing set, env, and printenv. set shows shell and environment variables plus functions; env and printenv show only the environment.",
+   "Mixing up quotes. Double quotes expand $VAR and $(command); single quotes expand nothing; a backslash protects one character.",
+   "Replacing PATH instead of adding to it. Use PATH=\"$PATH:/new/dir\", never PATH=/new/dir, and never add the current folder.",
+   "Expecting which to find builtins and aliases. type does; which only searches PATH.",
+   "Forgetting that changes at the prompt are temporary. They end with the shell; put them in ~/.bashrc or ~/.profile to keep them.",
+   "Mixing up login and non-login files. Login shells read /etc/profile and the first of ~/.bash_profile, ~/.bash_login, and ~/.profile; interactive non-login shells read ~/.bashrc.",
+   "Running exec at your own prompt. It replaces the shell, so the terminal closes when the command ends.",
+   "Reading $GROUPS as all groups. It is an array; use ${GROUPS[@]} or id -G.",
+   "Mixing up PS1 and PS2. PS1 is the main prompt; PS2 is the continuation prompt.",
+   "Thinking LC_ALL is a fallback. When set, it overrides LANG and all other LC_ variables."
+  ]
+ ],
+ [
+  "h2",
+  "Scenario-Based Challenge Exam"
+ ],
+ [
+  "p",
+  "Complete these tasks without notes. Use only your Linux Mint VM and the files in ~/lpic1-section12. Open a fresh terminal first so you start with a clean session."
+ ],
+ [
+  "numbered",
+  [
+   "Save your user name, home folder, shell, bash version, and history file location to reports/challenge-vars.txt using variables only.",
+   "Create a variable called CHANGE with the value CHG-2001 and prove that a child shell cannot see it until you export it.",
+   "Run date in UTC without changing your session's time zone.",
+   "Make diskreport run by name for this session only, and show where the shell found it.",
+   "Load configs/app02.env into your current shell and prove which of its variables a child process can see.",
+   "Show, in one line each, the difference between echo \"$HOME\", echo '$HOME', and echo \\$HOME.",
+   "Remove CHANGE from your session and prove it is gone, not just empty.",
+   "Explain which startup files a desktop terminal reads on Mint and which an ssh login reads, and prove which kind of shell you are in."
+  ]
+ ],
+ [
+  "p",
+  "Your final handoff is the reports directory. For each file, write a short sentence explaining what it proves, and confirm that ~/.bashrc matches reports/bashrc.backup."
+ ],
+ [
+  "h2",
+  "LPIC-Style Practical Questions"
+ ],
+ [
+  "bullets",
+  [
+   "Vendor request: “Send me your shell environment and kernel version so we can see why the installer fails.”",
+   "Developer request: “My deploy script can’t see the SITE variable even though echo shows it at my prompt. Why?”",
+   "Teammate request: “I dropped a tool in a bin folder in my home directory and the shell says command not found.”",
+   "Change manager request: “Every script you run tonight must see the change number. Set it up once.”",
+   "Operations request: “Load the app02 settings file into your session before you run the maintenance commands.”",
+   "Help desk request: “The user’s alias works in the desktop terminal but not when they ssh in. Explain why.”",
+   "Team lead request: “Make the team variable appear in every new terminal, and show me how you would undo it.”"
+  ],
+  3
+ ],
+ [
+  "h2",
+  "Mastery Checklist"
+ ],
+ [
+  "bullets",
+  [
+   "I can read variables with echo $VAR and printenv VAR, and list them with env, printenv, and set.",
+   "I can explain the difference between a shell variable and an environment variable.",
+   "I can create, change, export, unexport, and unset a variable, with no spaces around =.",
+   "I can prove whether a child shell or script sees a variable, and read SHLVL to know how deep I am.",
+   "I can run one command with a changed environment using VAR=value command, env, env -u, and env -i.",
+   "I can use double quotes, single quotes, and backslashes to control expansion.",
+   "I can read and extend PATH safely, and run a program by relative or absolute path when it is not in PATH.",
+   "I can use type and which to find out what a command name really runs.",
+   "I can explain USER, LOGNAME, HOME, PWD, UID, GROUPS, BASH_VERSION, HISTFILE, HISTSIZE, HOSTNAME, LANG, LC_ALL, TZ, and LD_LIBRARY_PATH.",
+   "I can change PS1 and PS2 and restore them.",
+   "I can explain source, the dot command, and exec, and when each one is safe to use.",
+   "I can name the startup files read by login and non-login shells, and make a setting permanent in ~/.bashrc."
+  ],
+  4
+ ]
+]

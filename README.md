@@ -1,23 +1,23 @@
 # LPIC-1 Lab Trainer
 
-A static, interactive Linux training app adapted from **LPIC - Section 2**, starting with Lab 1: Identify Basic System Information.
+A static, interactive training app for LPIC-1 exam 101-500, built from scenario-based lab
+workbooks. No framework, no build step, no external libraries. It runs from GitHub Pages, from
+a local web server, or straight from the folder.
 
-## Version 1 includes
+## What's in it (pilot)
 
-- A junior engineer support-ticket scenario
-- A simulated Linux terminal for `uname` practice
-- Five guided command tasks
-- Two knowledge-check questions
-- A no-hint final challenge
-- Progress saved in the browser with `localStorage`
-- Responsive and keyboard-friendly design
-- A GitHub Pages deployment workflow
-
-The simulated output is representative. Output on a real Linux Mint virtual machine will vary.
+- **Section 2: Command Line Basics (103.1)**: 8 lessons and a no-hint section ticket in a
+  simulated terminal. The terminal includes a small virtual filesystem, pipes and redirects,
+  history expansion, and a `man`/`info` pager with on-screen keys for iPhone.
+- **Section 15: Partitions, Filesystems and Swap (104.1, 104.3)**: 14 lessons you run on a
+  Linux Mint VM. Each lesson has steps with Copy buttons, an output-paste check, a
+  real-world trap and a quiz.
+- **A section review** for each section: a trap quiz, a challenge exam checklist, practical
+  questions with model answers, and a mastery checklist.
+- **Progress** is saved in the browser (`localStorage` key `lpic-lab-trainer.v2`), with
+  Export/Import on the home page. Progress from the original Lesson 1 moves over automatically.
 
 ## Run locally
-
-No package installation or build step is required.
 
 ```bash
 python3 -m http.server 8000
@@ -25,46 +25,35 @@ python3 -m http.server 8000
 
 Open `http://localhost:8000`.
 
-## Publish with GitHub Pages
-
-1. Create an empty GitHub repository, such as `lpic-lab-trainer`.
-2. Copy these files into the repository.
-3. Commit and push to the `main` branch:
-
-```bash
-git init
-git add .
-git commit -m "Build interactive LPIC system information lesson"
-git branch -M main
-git remote add origin https://github.com/YOUR-USER/lpic-lab-trainer.git
-git push -u origin main
-```
-
-4. In the GitHub repository, open **Settings > Pages**.
-5. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-6. The included workflow publishes the site after each push to `main`.
-
 ## Project structure
 
 ```text
-.
-├── .github/workflows/deploy-pages.yml
-├── .nojekyll
-├── app.js
-├── index.html
-├── styles.css
-└── README.md
+index.html            one page; the hash route picks the view (#/section/2, #/lesson/2.1, #/review/15)
+styles.css            design system
+js/core.js            data registration, saved progress, helpers
+js/shell.js           simulated Bash shell and virtual filesystem
+js/engine.js          renders home, sections, lessons, reviews; grades tasks
+data/course.js        section list and objective weights
+data/docs.js          short man, info and help pages for the practice terminal
+data/section-NN.js    one file per section
+tools/wbgen.py        builds a workbook .docx from a spec in tools/specs
+tools/vm_section.py   builds data/section-NN.js for a VM section from a spec plus tools/extras
 ```
 
-## Suggested next iteration
+To add a VM section:
 
-Add Lesson 2: Check the Bash Shell Version. Reuse the lesson shell, then add:
+```bash
+python tools/vm_section.py tools/specs/s16.json tools/extras/section16.py data/section-16.js
+```
 
-- `bash --version` terminal output
-- A short explanation of long options with two dashes
-- A guided observation prompt
-- A recall challenge without command hints
+Then add `"section-16"` to `data/course.js` and a `<script>` tag to `index.html`.
+
+## Publish with GitHub Pages
+
+The workflow in `.github/workflows/deploy-pages.yml` publishes the site on every push to `main`.
+In the repository's **Settings > Pages**, set **Source** to **GitHub Actions**.
 
 ## Content source
 
-Adapted from the user's Word document **LPIC - Section 2.docx**, Lab 1: Identify Basic System Information.
+Lessons are adapted from Max's LPIC-1 lab workbooks. Terminal output is simulated and may
+differ from a real Linux Mint VM.

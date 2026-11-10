@@ -1,0 +1,397 @@
+[
+ [
+  "h1",
+  "LPIC-1 Section 9 Scenario-Based IT Engineering Lab Guide"
+ ],
+ [
+  "sub",
+  "Objective 103.8: Perform basic file editing with nano and vi using realistic config fixes, handoff notes, and file conversion tasks."
+ ],
+ [
+  "h2",
+  "How to use this workbook"
+ ],
+ [
+  "p",
+  "Treat each lab like an IT engineer task, not a keystroke drill. Read the scenario, open the right file in the right editor, make only the change the request asks for, and prove the result from the command line with cat, grep, file, or a hash."
+ ],
+ [
+  "p",
+  "Use a Linux Mint VM. Stay inside the lab folder. Editing real configuration files under /etc can break a system, so every lab here uses practice copies."
+ ],
+ [
+  "h2",
+  "Lab Setup"
+ ],
+ [
+  "p",
+  "Step 1: Check whether you have the full vim editor. Linux Mint often ships only vim-tiny, which is missing many of the commands on the exam:"
+ ],
+ [
+  "p",
+  "readlink -f $(which vi)"
+ ],
+ [
+  "p",
+  "If the output ends in vim.tiny, install the full editor with: sudo apt install vim"
+ ],
+ [
+  "p",
+  "Step 2: Create the practice workspace:"
+ ],
+ [
+  "p",
+  "mkdir -p ~/lpic1-section9/{configs,reports,incoming,snippets}"
+ ],
+ [
+  "p",
+  "cd ~/lpic1-section9"
+ ],
+ [
+  "p",
+  "Step 3: Create the sample files:"
+ ],
+ [
+  "p",
+  "printf 'backup_enabled=true\\nretention_dyas=30\\nbackup_target=/srv/backup\\nowner=ops\\n' > configs/backup.conf"
+ ],
+ [
+  "p",
+  "for i in $(seq 1 30); do if [ $i -eq 23 ]; then echo \"setting_$i=onn\"; else echo \"setting_$i=on\"; fi; done > configs/app.conf"
+ ],
+ [
+  "p",
+  "printf 'Maintenance checklist\\nNotify the service desk\\nStop the web service on web01\\nStop the web service on web02\\nBack up the config files\\nApply the patch\\nRestart the services\\nConfirm monitoring is green\\n' > configs/maintenance.txt"
+ ],
+ [
+  "p",
+  "printf 'server=web03\\nrole=web\\nstatus=active\\n' > snippets/web03-entry.txt"
+ ],
+ [
+  "p",
+  "printf 'Shift notes from the Windows desktop team\\r\\nPrinter queue cleared\\r\\nVPN client updated\\r\\n' > incoming/windows-notes.txt"
+ ],
+ [
+  "p",
+  "Validation check: Run ls -R and confirm configs, reports, incoming, and snippets contain the files above. If a lab goes wrong, rerun Step 3 to reset the sample files."
+ ],
+ [
+  "h2",
+  "Commands to Memorize"
+ ],
+ [
+  "p",
+  "nano, Ctrl+O, Ctrl+X, emacs, vi, vim, which vi, readlink -f, i, a, o, Esc, h, j, k, l, ^, $, Ctrl+D, Ctrl+U, /pattern, ?pattern, n, dw, d2w, D, dd, d3d, yw, yy, p, P, u, :w, :w newfile, :wq, :wq!, :q!, :x, ZZ, :r file, :set number, :set ff=dos, :set ff=unix, file, and the EDITOR variable."
+ ],
+ [
+  "h2",
+  "Memory hook"
+ ],
+ [
+  "p",
+  "vi has three modes. Command mode is home base, where keys move the cursor and change text. Insert mode is where you type text; i, a, and o get you there, and Esc brings you back. Ex mode starts with a colon and handles files and settings: write, quit, read, number lines, and change line endings. When you are lost, press Esc, then decide whether to save with :wq or abandon with :q!."
+ ],
+ [
+  "h2",
+  "Beginner Labs: Choosing and Using an Editor"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 1: Confirm which vi will run before a maintenance window",
+   "scenario": "You are about to edit configs on a new workstation build. A teammate warns that some builds only have a stripped-down vi.",
+   "task": "Find out where vi runs from and which program it really is.",
+   "deliverable": "Save the evidence to reports/editor-check.txt.",
+   "steps": [
+    "which vi > reports/editor-check.txt",
+    "type vi >> reports/editor-check.txt",
+    "readlink -f $(which vi) >> reports/editor-check.txt"
+   ],
+   "validation": "cat reports/editor-check.txt and confirm the last line ends in vim.basic or vim, not vim.tiny.",
+   "trap": "which only shows the first path it finds. readlink -f follows the links to the real program. On some systems vi is also an alias, which only type will reveal."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 2: Write a quick shift handoff with nano",
+   "scenario": "You are leaving an incident bridge and need a short handoff note for the next engineer. You want the simplest editor available.",
+   "task": "Create reports/nano-handoff.txt in nano with a status line and a next-action line.",
+   "deliverable": "A saved file with two lines of text.",
+   "steps": [
+    "nano reports/nano-handoff.txt",
+    "Type the two lines, press Ctrl+O, press Enter to keep the file name, then press Ctrl+X to exit."
+   ],
+   "validation": "cat reports/nano-handoff.txt",
+   "trap": "Ctrl+O means write Out, not Open. nano shows its shortcuts at the bottom of the screen, where ^ means the Ctrl key."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 3: Move between the three vi modes",
+   "scenario": "A senior engineer asks you to prove you can create a file in vi without getting stuck in it.",
+   "task": "Create reports/vi-modes.txt in vi, add one line, save it with an ex command, then exit.",
+   "deliverable": "A file containing the line you typed.",
+   "steps": [
+    "vi reports/vi-modes.txt",
+    "Press i and confirm -- INSERT -- appears at the bottom. Type: Command mode, insert mode, ex mode",
+    "Press Esc to return to command mode, type :w and press Enter to save, then type :q and press Enter to quit."
+   ],
+   "validation": "cat reports/vi-modes.txt",
+   "trap": "Typing a command such as :w while you are still in insert mode just adds the text :w to the file. Press Esc first. When in doubt, press Esc twice."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 4: Abandon a bad edit without damaging the file",
+   "scenario": "While reviewing configs/backup.conf you accidentally delete several lines. The original must stay exactly as it was.",
+   "task": "Record a hash of the file, make some throwaway changes in vi, then quit without saving.",
+   "deliverable": "Proof that the file is unchanged.",
+   "steps": [
+    "sha256sum configs/backup.conf > reports/backup-hash.txt",
+    "vi configs/backup.conf, press dd twice to delete two lines, then type :q! and press Enter.",
+    "sha256sum configs/backup.conf >> reports/backup-hash.txt"
+   ],
+   "validation": "cat reports/backup-hash.txt and confirm both hash values match.",
+   "trap": "Plain :q refuses to quit when there are unsaved changes. :q! discards them. :wq! does the opposite and forces the save, so read the command before pressing Enter."
+  }
+ ],
+ [
+  "h2",
+  "Intermediate Labs: Moving and Searching in Command Mode"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 5: Navigate a long config without the arrow keys",
+   "scenario": "You are connected to a server through a console that does not pass arrow keys reliably.",
+   "task": "Open configs/app.conf in vi and move around using only command mode keys.",
+   "deliverable": "A short note in reports/vi-navigation.txt describing what each key did.",
+   "steps": [
+    "vi configs/app.conf",
+    "Use j to move down, k to move up, h to move left, and l to move right. Press $ to jump to the end of a line and ^ to jump back to its start. Press Ctrl+D to move down half a screen and Ctrl+U to move back up.",
+    "Exit with :q, then record your notes: nano reports/vi-navigation.txt"
+   ],
+   "validation": "cat reports/vi-navigation.txt",
+   "trap": "h, j, k, and l only work in command mode. In insert mode they are typed into the file as letters."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 6: Find a setting with forward and backward searches",
+   "scenario": "A teammate asks whether setting_17 is enabled in the application config.",
+   "task": "Search forward for setting_17, then search backward for setting_5.",
+   "deliverable": "A one-line answer in reports/setting-17.txt.",
+   "steps": [
+    "vi configs/app.conf",
+    "Type /setting_17 and press Enter. Type ?setting_5 and press Enter. Press n to repeat a search in the same direction. Exit with :q.",
+    "grep setting_17 configs/app.conf > reports/setting-17.txt"
+   ],
+   "validation": "cat reports/setting-17.txt",
+   "trap": "Searching for setting_1 also matches setting_10 through setting_19. Make the pattern as specific as the request."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 7: Fix the line named in an error message",
+   "scenario": "An application fails to start and logs: invalid value on line 23 of app.conf.",
+   "task": "Turn on line numbers, go to line 23, fix the bad value, and save.",
+   "deliverable": "configs/app.conf with setting_23=on.",
+   "steps": [
+    "vi configs/app.conf",
+    "Type :set number and press Enter. Type :23 and press Enter to jump to that line. Press $ to reach the end of the line, press x to delete the extra n, then type :wq and press Enter."
+   ],
+   "validation": "grep -n 'setting_23' configs/app.conf and confirm the line reads setting_23=on.",
+   "trap": ":set number only changes the display. The numbers are not written into the file."
+  }
+ ],
+ [
+  "h2",
+  "Advanced Labs: Changing, Copying, and Converting Text"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 8: Insert, append, and open new lines",
+   "scenario": "The maintenance checklist is missing steps, and one setting in backup.conf is misspelled.",
+   "task": "Fix retention_dyas to retention_days in backup.conf, then add a step to the checklist.",
+   "deliverable": "Both files corrected and saved.",
+   "steps": [
+    "vi configs/backup.conf, go to the second line, place the cursor on the y in dyas, and press x twice to delete y and a. Press i, type ay, press Esc, and save with :wq.",
+    "vi configs/maintenance.txt, go to the line Apply the patch, press o to open a new line below it, type Take a snapshot of the VM, press Esc, and save with :x.",
+    "Practice the difference: a starts typing after the cursor, i before it, and o on a new line below. Press u to undo anything that goes wrong."
+   ],
+   "validation": "grep retention configs/backup.conf and cat configs/maintenance.txt",
+   "trap": "u undoes the last change. In vim you can press u repeatedly to step further back, and Ctrl+R redoes."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 9: Delete and move text",
+   "scenario": "The change advisory board wants the checklist reordered so the backup happens before any service is stopped.",
+   "task": "Move the Back up the config files line above the first Stop line.",
+   "deliverable": "configs/maintenance.txt in the new order.",
+   "steps": [
+    "vi configs/maintenance.txt",
+    "Move to the Back up the config files line and press dd to delete it into the buffer. Move to the Notify the service desk line and press p to paste it below that line. Save with ZZ.",
+    "Then practice on a scratch copy: cp configs/maintenance.txt reports/scratch.txt and use dw, d2w, D, and d3d on it, pressing u after each one."
+   ],
+   "validation": "cat configs/maintenance.txt",
+   "trap": "dw deletes from the cursor to the start of the next word. If the cursor is in the middle of a word, only the rest of that word is removed."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 10: Yank and paste to duplicate entries",
+   "scenario": "Two more web servers are being added, and the checklist needs a Stop line for each of them.",
+   "task": "Copy an existing Stop line twice and edit the copies to name web03 and web04.",
+   "deliverable": "The checklist with four Stop lines.",
+   "steps": [
+    "vi configs/maintenance.txt",
+    "Go to the Stop the web service on web02 line, press yy to yank it, then press p twice. Change 02 to 03 and 04 on the new lines with x and i. Save with :wq."
+   ],
+   "validation": "grep -c '^Stop' configs/maintenance.txt and confirm the count is 4.",
+   "trap": "yank means copy. p pastes after the cursor or below the current line, and P pastes before the cursor or above the current line."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 11: Read a snippet into the file and save a new version",
+   "scenario": "A new server entry was prepared in a separate snippet file. It needs to go into a new inventory file without retyping it.",
+   "task": "Start vi on a new file, read the snippet into the buffer, and save under a new name.",
+   "deliverable": "reports/inventory.txt containing the web03 entry.",
+   "steps": [
+    "vi reports/inventory.txt",
+    "Type :r snippets/web03-entry.txt and press Enter. Type :w and press Enter, then :w reports/inventory-copy.txt to save a second copy, and quit with :q."
+   ],
+   "validation": "cat reports/inventory.txt reports/inventory-copy.txt",
+   "trap": ":r inserts the file below the cursor line. :w newname writes a copy but you are still editing the original file name."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 12: Convert Windows line endings",
+   "scenario": "The desktop team sent shift notes created on Windows. A Linux script that reads the file shows stray ^M characters.",
+   "task": "Identify the line endings, convert the file to Unix format, and save it.",
+   "deliverable": "incoming/windows-notes.txt with Unix line endings.",
+   "steps": [
+    "file incoming/windows-notes.txt > reports/line-endings.txt",
+    "vi incoming/windows-notes.txt, type :set ff=unix, press Enter, then save with :x.",
+    "file incoming/windows-notes.txt >> reports/line-endings.txt"
+   ],
+   "validation": "cat reports/line-endings.txt. The first line mentions CRLF line terminators and the second does not.",
+   "trap": "Converting the other way, for a Windows user, is :set ff=dos. The file command is the quickest way to check which format you have."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 13: Set the default editor",
+   "scenario": "Tools such as crontab -e and visudo open whatever editor is set in the EDITOR variable. Your team standard is vi.",
+   "task": "Check the current value of EDITOR, set it to vi for this session, and confirm it.",
+   "deliverable": "reports/editor-variable.txt showing the new value.",
+   "steps": [
+    "echo $EDITOR",
+    "export EDITOR=vi",
+    "echo $EDITOR > reports/editor-variable.txt"
+   ],
+   "validation": "cat reports/editor-variable.txt",
+   "trap": "export only lasts for the current shell. To keep it, add the export line to ~/.bashrc."
+  }
+ ],
+ [
+  "h2",
+  "Common Exam Traps"
+ ],
+ [
+  "bullets",
+  [
+   "Forgetting which mode you are in. Commands typed in insert mode become text in the file. Press Esc to return to command mode.",
+   "Mixing up :q! and :wq!. :q! quits and throws away changes; :wq! forces the write and then quits.",
+   "Thinking :x and ZZ discard changes. Both save and exit, like :wq.",
+   "Assuming ex commands work without the colon. :w, :q, :r, and :set all start with a colon; ZZ does not.",
+   "Confusing p and P. Lowercase p pastes after the cursor or below the line; uppercase P pastes before or above.",
+   "Mixing up a and i. a appends after the cursor; i inserts before it. o opens a new line below.",
+   "Expecting dw to delete a whole word from the middle of the word. It deletes from the cursor forward.",
+   "Confusing D with dd. D deletes from the cursor to the end of the line; dd deletes the entire line.",
+   "Forgetting that yank means copy. yy copies a line; dd cuts it.",
+   "Mixing up search directions. / searches forward and ? searches backward, the same as in less and man.",
+   "Thinking :set number saves line numbers into the file. It only changes the display.",
+   "Expecting every exam command to work on vim-tiny. Check with readlink -f $(which vi).",
+   "Knowing nano and emacs only by name. nano saves with Ctrl+O and exits with Ctrl+X; emacs saves with Ctrl+X Ctrl+S and exits with Ctrl+X Ctrl+C.",
+   "Forgetting that EDITOR controls which editor other tools open, and that export only lasts for the current shell."
+  ]
+ ],
+ [
+  "h2",
+  "Scenario-Based Challenge Exam"
+ ],
+ [
+  "p",
+  "Complete these tasks without notes. Use only your Linux Mint VM and the files in ~/lpic1-section9. Rerun Step 3 of the Lab Setup first so you start from fresh sample files."
+ ],
+ [
+  "numbered",
+  [
+   "Prove which program vi really runs on your system and save the evidence to reports/challenge-editor.txt.",
+   "Fix the bad value on line 23 of configs/app.conf using line numbers in vi.",
+   "Correct the misspelled setting in configs/backup.conf without retyping the whole line.",
+   "Move the backup step in configs/maintenance.txt so it comes right after the service desk notification.",
+   "Add Stop lines for web03 and web04 to the checklist by yanking and pasting.",
+   "Make a throwaway edit to configs/backup.conf and leave vi without saving it. Prove with a hash that the file did not change.",
+   "Convert incoming/windows-notes.txt to Unix line endings and prove the change with file.",
+   "Set EDITOR to vi for your session and show its value."
+  ]
+ ],
+ [
+  "p",
+  "Your final handoff is the reports directory and the corrected files. For each one, write a short sentence explaining what it proves."
+ ],
+ [
+  "h2",
+  "LPIC-Style Practical Questions"
+ ],
+ [
+  "bullets",
+  [
+   "Manager request: “The app log says line 23 of app.conf is invalid. Fix that line and nothing else.”",
+   "Security analyst request: “You opened the backup config by mistake and changed it. Leave the editor without saving and prove the file is untouched.”",
+   "Incident bridge request: “Write a two-line handoff note quickly. Use whichever editor is fastest for you.”",
+   "Project lead request: “Add entries for two new web servers to the maintenance checklist without retyping the existing line.”",
+   "Teammate request: “My script chokes on a file from a Windows user and shows ^M at the end of each line. Can you fix the file?”",
+   "Operations request: “crontab -e keeps opening nano. Make it open vi for your session.”",
+   "Maintenance window request: “Before you edit anything, confirm this build has the full vi editor and not the tiny version.”"
+  ],
+  3
+ ],
+ [
+  "h2",
+  "Mastery Checklist"
+ ],
+ [
+  "bullets",
+  [
+   "I can name the three vi modes and move between them with i, a, o, Esc, and the colon.",
+   "I can save and exit vi with :wq, :x, and ZZ, and abandon changes with :q!.",
+   "I can explain the difference between :q!, :wq!, and :wq.",
+   "I can move around with h, j, k, l, ^, $, Ctrl+D, and Ctrl+U.",
+   "I can search forward with / and backward with ?, and repeat a search with n.",
+   "I can jump to a line number with :set number and :NUMBER.",
+   "I can delete text with dw, a count such as d2w, D, dd, and d3d, and undo with u.",
+   "I can copy with yw and yy and paste with p and P.",
+   "I can read another file into the buffer with :r and save a copy with :w newname.",
+   "I can check line endings with file and convert them with :set ff=unix or :set ff=dos.",
+   "I can create and save a file in nano with Ctrl+O and Ctrl+X, and I know the basic emacs save and exit keys.",
+   "I can check whether vi is the full vim or vim-tiny, and set the EDITOR variable."
+  ],
+  4
+ ]
+]

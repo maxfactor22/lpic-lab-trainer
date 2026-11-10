@@ -1,0 +1,261 @@
+[
+ ["h1", "LPIC-1 Section 17 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objective 101.2: Boot the system. Trace the boot from BIOS or UEFI firmware through the boot loader, kernel, and initramfs to init, and read boot events with dmesg and journalctl."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like a boot-support ticket, not a reading exercise. Read the scenario, find the evidence on your own system, and save a short report that answers the question in the ticket. The goal is to be able to explain every stage of the boot from what you can see on a running machine."],
+ ["p", "Safety first. Every lab in this section is inspect-and-explain. You read files, firmware information, and logs; you never reinstall the boot loader, regenerate the GRUB configuration, rebuild the initramfs, change the default target, or reboot. Anything marked Don't run on your VM is exam content to read and explain only."],
+ ["p", "Linux Mint uses GRUB2 and systemd. GRUB Legacy (menu.lst) and SysVinit (/etc/inittab) are still on the exam, so this workbook gives you sample files from an old server in the samples folder to read and explain. Section 18 goes deeper into GRUB Legacy, the GRUB menus, kernel parameters, and the GRUB2 configuration files."],
+ ["p", "Several commands need sudo on Mint: reading the disk, /boot/vmlinuz, /boot/grub/grub.cfg, /boot/efi, /var/log/boot.log, and dmesg (Mint restricts the kernel log to administrators)."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section17/{reports,samples}"],
+ ["p", "cd ~/lpic1-section17"],
+ ["p", "Step 2: Find the name of your boot disk (sda, vda, or nvme0n1 on most VMs) and keep it in a variable. Rerun this step in any new terminal:"],
+ ["p", "export DISK=/dev/$(lsblk -dno NAME,TYPE | awk '$2==\"disk\"{print $1; exit}')"],
+ ["p", "echo $DISK"],
+ ["p", "Step 3: Create the sample files from an old server, web01, that still runs GRUB Legacy and SysVinit:"],
+ ["p", "printf 'default=1\\ntimeout=5\\nhiddenmenu\\ntitle OldLinux (2.6.32-754)\\n\\troot (hd0,0)\\n\\tkernel /vmlinuz-2.6.32-754 ro root=/dev/sda2 quiet\\n\\tinitrd /initramfs-2.6.32-754.img\\ntitle OldLinux (2.6.32-696)\\n\\troot (hd0,0)\\n\\tkernel /vmlinuz-2.6.32-696 ro root=/dev/sda2\\n\\tinitrd /initramfs-2.6.32-696.img\\n' > samples/menu.lst"],
+ ["p", "printf 'id:3:initdefault:\\nsi::sysinit:/etc/rc.d/rc.sysinit\\nl0:0:wait:/etc/rc.d/rc 0\\nl1:1:wait:/etc/rc.d/rc 1\\nl3:3:wait:/etc/rc.d/rc 3\\nl5:5:wait:/etc/rc.d/rc 5\\nl6:6:wait:/etc/rc.d/rc 6\\n1:2345:respawn:/sbin/mingetty tty1\\n' > samples/inittab"],
+ ["p", "printf '[    0.000000] Linux version 2.6.32-754 (builder@buildhost)\\n[    1.204331] ahci 0000:00:1f.2: AHCI 0001.0300 32 slots 6 ports\\n[    3.410972] EXT4-fs (sda2): mounted filesystem with ordered data mode\\n[    5.118204] e1000e 0000:00:19.0: firmware: failed to load e1000e/nic-fw.bin (-2)\\n[    5.118230] e1000e: probe of 0000:00:19.0 failed with error -2\\n[    7.002114] init: Entering runlevel: 3\\n' > samples/boot-incident.log"],
+ ["p", "Validation check: Run ls samples and confirm menu.lst, inittab, and boot-incident.log exist, then run grep -c '^title' samples/menu.lst and confirm it prints 2. echo $DISK must print a device such as /dev/sda; if it prints only /dev/, run lsblk -d and set DISK by hand."],
+ ["h2", "Commands to Memorize"],
+ ["p", "/sys/firmware/efi, efibootmgr, fdisk -l, lsblk, findmnt /boot/efi, /boot/efi/EFI, uname -r, ls /boot, vmlinuz, initrd.img, file, lsinitramfs, update-initramfs, dracut, mkinitrd, /boot/grub/grub.cfg, /boot/grub2/grub.cfg, menu.lst, grub.conf, grub-install, /proc/cmdline, ps -p 1, /sbin/init, systemctl get-default, runlevel, who -r, init, telinit, /etc/inittab, initctl, dmesg, dmesg -T, dmesg --level, journalctl -b, journalctl -b -1, journalctl --list-boots, journalctl -k, journalctl -p err, /var/log/boot.log, /var/log/kern.log, systemd-analyze, systemd-analyze blame, and systemd-analyze critical-chain."],
+ ["h2", "Memory hook"],
+ ["p", "Firmware, loader, kernel, init: Fix Lunch, Kids Inside. The firmware (BIOS reading the MBR, or UEFI reading the EFI system partition) runs the power-on self-test and finds the boot loader. The boot loader (GRUB2 today, GRUB Legacy or LILO in the past) loads the kernel and the initramfs and hands the kernel its command line. The kernel uses the initramfs drivers to find the real root filesystem, then starts init as PID 1. Init (systemd today, SysVinit or Upstart in the past) starts the services and gives you a login. dmesg reads the kernel's part of the story; journalctl -b reads all of it."],
+ ["h2", "Beginner Labs: Firmware and the Boot Disk"],
+ ["lab", {
+  "title": "Lab 1: Find out whether the VM boots with BIOS or UEFI",
+  "scenario": "A hypervisor migration ticket asks for the firmware type of every Linux guest, because UEFI guests need their EFI disk moved with them.",
+  "task": "Check for the UEFI interface in /sys and record the firmware boot entries if there are any.",
+  "deliverable": "reports/firmware.txt.",
+  "steps": [
+   "if [ -d /sys/firmware/efi ]; then echo 'Firmware: UEFI'; else echo 'Firmware: BIOS (legacy)'; fi > reports/firmware.txt",
+   "ls /sys/firmware/efi >> reports/firmware.txt 2>&1",
+   "sudo efibootmgr >> reports/firmware.txt 2>&1"
+  ],
+  "validation": "head -n 1 reports/firmware.txt names the firmware type. On UEFI, efibootmgr lists BootOrder and an entry such as ubuntu; on BIOS, the ls line shows No such file or directory and efibootmgr reports that EFI variables are not supported (or is not installed).",
+  "trap": "The /sys/firmware/efi directory exists only when the running system was started by UEFI. Many VMs still default to BIOS. efibootmgr only reads entries here; with -c, -b, or -o it changes firmware settings, so never use those options on this VM."
+ }],
+ ["lab", {
+  "title": "Lab 2: Map the partition table and the EFI system partition",
+  "scenario": "A colleague is rebuilding app02 and asks what partition table your build uses and where the boot loader files live, so the new disk can be laid out the same way.",
+  "task": "Record the disk label type, the partitions and their types, and the EFI system partition if there is one.",
+  "deliverable": "reports/disk-layout.txt.",
+  "steps": [
+   "sudo fdisk -l \"$DISK\" > reports/disk-layout.txt",
+   "lsblk -o NAME,SIZE,FSTYPE,PARTTYPENAME,MOUNTPOINT \"$DISK\" >> reports/disk-layout.txt",
+   "findmnt /boot/efi >> reports/disk-layout.txt",
+   "sudo sh -c 'ls /boot/efi/EFI/*/' >> reports/disk-layout.txt 2>&1"
+  ],
+  "validation": "grep -i 'disklabel type' reports/disk-layout.txt shows dos (MBR) or gpt. On UEFI, the file also shows a vfat filesystem mounted on /boot/efi and the files shimx64.efi and grubx64.efi.",
+  "trap": "BIOS with an MBR disk keeps the first stage of the boot loader in the first 446 bytes of the disk. UEFI ignores that code and loads a .efi program from the EFI system partition (ESP), a small FAT filesystem mounted on /boot/efi. fdisk -l only reads. The ESP is readable only by root on Mint, which is why the ls runs inside sudo sh -c (otherwise your own shell would try to expand the * and fail). Never type commands into fdisk's interactive prompt on this disk."
+ }],
+ ["lab", {
+  "title": "Lab 3: Read the first sector of the disk without changing it",
+  "scenario": "A training request asks you to show a junior engineer what the master boot record is, using real evidence instead of a diagram.",
+  "task": "Copy the first 512 bytes of the disk into a file, identify it, and show the boot signature.",
+  "deliverable": "reports/sector0.bin and reports/sector0.txt.",
+  "steps": [
+   "sudo head -c 512 \"$DISK\" > reports/sector0.bin",
+   "file reports/sector0.bin > reports/sector0.txt",
+   "od -An -tx1 -j510 -N2 reports/sector0.bin >> reports/sector0.txt"
+  ],
+  "validation": "cat reports/sector0.txt shows a DOS/MBR boot sector (often naming GRUB), and the last line reads 55 aa.",
+  "trap": "The 512-byte MBR holds 446 bytes of boot code, a 64-byte partition table (four primary entries), and the 2-byte signature 55 aa. Because the boot code is so small, it only loads the next stage, a technique called chain loading. A GPT disk keeps a protective MBR in the same place. Reading the disk is safe; writing to it with dd is how boot sectors get destroyed."
+ }],
+ ["h2", "Intermediate Labs: Boot Loader, Kernel, and initramfs"],
+ ["lab", {
+  "title": "Lab 4: Inventory the kernels in /boot",
+  "scenario": "Before a patch window on web01, the change owner wants to know which kernel is running and which older kernels are still available as a fallback.",
+  "task": "Record the running kernel, list /boot, and identify the kernel file type.",
+  "deliverable": "reports/kernel.txt.",
+  "steps": [
+   "uname -r > reports/kernel.txt",
+   "ls -l /boot >> reports/kernel.txt",
+   "sudo file -L /boot/vmlinuz >> reports/kernel.txt"
+  ],
+  "validation": "grep -c \"$(uname -r)\" reports/kernel.txt returns at least 4 (the uname line plus the vmlinuz, initrd.img, config, and System.map files for that version), and the last line says Linux kernel x86 boot executable bzImage.",
+  "trap": "The z in vmlinuz means the kernel is compressed. On Mint, /boot/vmlinuz and /boot/vmlinuz.old are symbolic links to the newest and previous kernels. Red Hat systems also keep a rescue kernel in /boot. The kernel files are readable only by root on Mint, so file needs sudo."
+ }],
+ ["lab", {
+  "title": "Lab 5: Explain what is inside the initramfs",
+  "scenario": "A storage vendor asks whether the driver for your disk controller loads before the root filesystem is mounted. The answer is in the initial RAM filesystem.",
+  "task": "Measure the initramfs, count its files, and look for the filesystem and disk drivers it carries.",
+  "deliverable": "reports/initramfs.txt.",
+  "steps": [
+   "ls -lh /boot/initrd.img-$(uname -r) > reports/initramfs.txt",
+   "lsinitramfs /boot/initrd.img-$(uname -r) | wc -l >> reports/initramfs.txt",
+   "lsinitramfs /boot/initrd.img-$(uname -r) | grep -E 'kernel/fs/ext4|ahci|virtio|nvme' | head -n 10 >> reports/initramfs.txt",
+   "Read only, Don't run on your VM: sudo update-initramfs -u rebuilds the initramfs on Mint; Red Hat uses dracut, and older systems used mkinitrd."
+  ],
+  "validation": "cat reports/initramfs.txt shows a size of tens of megabytes, a file count in the thousands, and module paths such as kernel/fs/ext4 or virtio (drivers built into the kernel will not appear).",
+  "trap": "The kernel cannot read the root filesystem until it has the right storage and filesystem drivers, so the boot loader loads a small root filesystem into RAM first. The old version was a disk image called an initrd; modern systems use a cpio archive called an initramfs, but the GRUB keyword and Mint's file name still say initrd."
+ }],
+ ["lab", {
+  "title": "Lab 6: Trace the default GRUB2 menu entry to its files",
+  "scenario": "After a failed patch on db01, the incident lead asks which kernel and initramfs the default boot menu entry actually loads.",
+  "task": "Pull the first menu entry and its linux and initrd lines out of grub.cfg and compare them with the running kernel.",
+  "deliverable": "reports/grub-trace.txt.",
+  "steps": [
+   "sudo grep -E '^\\s*(menuentry|linux|initrd)\\s' /boot/grub/grub.cfg | head -n 3 > reports/grub-trace.txt",
+   "uname -r >> reports/grub-trace.txt",
+   "sudo sh -c 'cat /boot/efi/EFI/*/grub.cfg' >> reports/grub-trace.txt 2>&1"
+  ],
+  "validation": "grep -c \"$(uname -r)\" reports/grub-trace.txt returns at least 3: the linux line, the initrd line, and the uname line. On UEFI, the last lines show a short grub.cfg in the ESP that points to the real one under /boot/grub.",
+  "trap": "grub.cfg is generated; never edit it by hand. Mint and Debian keep it in /boot/grub/grub.cfg; Red Hat uses /boot/grub2/grub.cfg, and some UEFI systems keep it in /boot/efi/EFI/<distro>/. GRUB Legacy used menu.lst or grub.conf instead. Section 18 covers how the file is built."
+ }],
+ ["lab", {
+  "title": "Lab 7: Read the kernel command line in use",
+  "scenario": "A performance ticket asks whether the boot parameters on your build were changed from the defaults, and which root filesystem the kernel was told to mount.",
+  "task": "Record the running kernel's command line and match its root= value to the real root filesystem.",
+  "deliverable": "reports/cmdline.txt.",
+  "steps": [
+   "cat /proc/cmdline > reports/cmdline.txt",
+   "findmnt -no SOURCE,UUID / >> reports/cmdline.txt"
+  ],
+  "validation": "cat reports/cmdline.txt: the UUID in root=UUID=... on the first line matches the UUID on the second line, and the line includes ro and quiet splash.",
+  "trap": "/proc/cmdline shows what the boot loader passed this boot, including temporary edits made at the GRUB menu. ro means the root filesystem is mounted read-only first so it can be checked, then remounted read-write during startup. BOOT_IMAGE is added by GRUB."
+ }],
+ ["lab", {
+  "title": "Lab 8: Explain a GRUB Legacy menu from an old server",
+  "scenario": "An old server, web01, still runs GRUB Legacy. The on-call engineer asks which kernel it boots by default and how long the menu waits.",
+  "task": "Read samples/menu.lst, number the title sections from zero, and write down which entry boots.",
+  "deliverable": "reports/legacy-menu.txt.",
+  "steps": [
+   "grep -E '^(default|timeout|hiddenmenu)' samples/menu.lst > reports/legacy-menu.txt",
+   "grep '^title' samples/menu.lst | awk '{print NR-1\": \"$0}' >> reports/legacy-menu.txt",
+   "grep -E 'root|kernel|initrd' samples/menu.lst | head -n 3 >> reports/legacy-menu.txt",
+   "echo 'Answer: default=1 boots entry 1, the 2.6.32-696 kernel, from (hd0,0) = first disk, first partition = /dev/sda1, after a 5-second hidden menu' >> reports/legacy-menu.txt",
+   "Read only, Don't run on your VM: on a GRUB Legacy server, grub-install /dev/sda writes the boot loader to the MBR; edits to menu.lst take effect at the next boot with no extra command."
+  ],
+  "validation": "grep -c '^[01]: title' reports/legacy-menu.txt returns 2, and the Answer line names the 2.6.32-696 kernel.",
+  "trap": "GRUB Legacy counts both disks and partitions from 0, so (hd0,0) is the first partition on the first disk. default counts title sections from 0, so default=1 is the second entry. hiddenmenu hides the menu until a key is pressed. root sets the disk with the kernel; the kernel line holds the path and kernel parameters. Older still, LILO only worked with BIOS; systemd-boot only works with UEFI."
+ }],
+ ["h2", "Advanced Labs: init and Boot Messages"],
+ ["lab", {
+  "title": "Lab 9: Identify the init system and the default boot target",
+  "scenario": "A compliance questionnaire asks which init system each server uses and what state it boots into. You also have an old SysVinit server to describe.",
+  "task": "Identify PID 1, the default target, and the current runlevel, then read the default runlevel from the sample inittab.",
+  "deliverable": "reports/init.txt.",
+  "steps": [
+   "ps -p 1 -o pid,comm > reports/init.txt",
+   "readlink -f /sbin/init >> reports/init.txt",
+   "systemctl get-default >> reports/init.txt",
+   "runlevel >> reports/init.txt",
+   "who -r >> reports/init.txt",
+   "ls /etc/inittab >> reports/init.txt 2>&1",
+   "grep initdefault samples/inittab >> reports/init.txt"
+  ],
+  "validation": "cat reports/init.txt shows systemd as PID 1, graphical.target, N 5 from runlevel, No such file or directory for /etc/inittab, and id:3:initdefault: from the sample.",
+  "trap": "SysVinit read its default runlevel from /etc/inittab and started services one after another; systemd starts them in parallel and uses targets. Upstart, used by older Ubuntu releases, was managed with initctl. Runlevels are 0 halt, 1 single user, 2 to 5 multi-user (3 text, 5 graphical on Red Hat), and 6 reboot. Changing runlevels used init or telinit; never run init 0 or init 6 on this VM."
+ }],
+ ["lab", {
+  "title": "Lab 10: Map old runlevels to systemd targets",
+  "scenario": "A runbook written for SysVinit servers says to switch to runlevel 3 for maintenance. The team wants the systemd equivalent documented before anyone follows it.",
+  "task": "List the runlevel compatibility targets and the targets that are active now.",
+  "deliverable": "reports/runlevel-map.txt.",
+  "steps": [
+   "ls -l /lib/systemd/system/runlevel?.target > reports/runlevel-map.txt",
+   "systemctl list-units --type=target --state=active --no-pager >> reports/runlevel-map.txt"
+  ],
+  "validation": "grep -E 'runlevel(1|3|5).target' reports/runlevel-map.txt shows runlevel1 linked to rescue.target, runlevel3 to multi-user.target, and runlevel5 to graphical.target.",
+  "trap": "These links let old commands keep working. multi-user.target is the text-mode, networked state; graphical.target adds the desktop. Switching targets on a live system (systemctl isolate) and changing the default (systemctl set-default) are later topics; do not run them here."
+ }],
+ ["lab", {
+  "title": "Lab 11: Find a hardware failure in the kernel ring buffer",
+  "scenario": "After a NIC replacement on web01, the network card does not appear. The hardware team sent you the boot messages, and you also want the same evidence format from your own VM.",
+  "task": "Find the failure in the sample log, then read your own kernel ring buffer with readable timestamps and only warnings and errors.",
+  "deliverable": "reports/web01-findings.txt and reports/dmesg.txt.",
+  "steps": [
+   "grep -iE 'fail|error' samples/boot-incident.log > reports/web01-findings.txt",
+   "sudo dmesg -T | head -n 3 > reports/dmesg.txt",
+   "sudo dmesg --level=err,warn >> reports/dmesg.txt",
+   "sudo dmesg | grep -i 'command line' >> reports/dmesg.txt"
+  ],
+  "validation": "grep -c . reports/web01-findings.txt returns 2 (the missing firmware file and the failed probe). reports/dmesg.txt starts with the Linux version line and contains the Kernel command line.",
+  "trap": "The kernel ring buffer is a fixed-size area in RAM. New messages push out the oldest, so read boot messages soon after boot or from the journal. Timestamps are seconds since boot unless you add -T. dmesg -c clears the buffer after reading it; do not use it. Mint requires sudo for dmesg."
+ }],
+ ["lab", {
+  "title": "Lab 12: Compare this boot with the previous boot in the journal",
+  "scenario": "A user reports that app02 rebooted overnight. You need the boot list, the kernel messages for this boot, and any errors from this boot and the last one.",
+  "task": "List recorded boots, then pull kernel messages and errors for the current and previous boot, and check the boot log files.",
+  "deliverable": "reports/journal.txt.",
+  "steps": [
+   "journalctl --list-boots --no-pager | tail -n 3 > reports/journal.txt",
+   "journalctl -b -k --no-pager | head -n 3 >> reports/journal.txt",
+   "journalctl -b -p err --no-pager >> reports/journal.txt",
+   "journalctl -b -1 -k --no-pager | tail -n 3 >> reports/journal.txt 2>&1",
+   "sudo ls -l /var/log/boot.log /var/log/kern.log >> reports/journal.txt 2>&1"
+  ],
+  "validation": "cat reports/journal.txt shows at least one boot in the list (0 is the current boot), the first kernel lines of this boot, and either messages from boot -1 or a note that no previous boot is recorded. If the output is empty, rerun the journalctl commands with sudo.",
+  "trap": "journalctl -b is this boot, -b -1 the previous one, -k (or --dmesg) only kernel messages, and -p err errors and worse. Older boots are only available when the journal is persistent (/var/log/journal); a volatile journal in /run/log/journal is lost at shutdown. /var/log/boot.log holds the startup messages on many distributions."
+ }],
+ ["lab", {
+  "title": "Lab 13: Measure each boot stage",
+  "scenario": "Developers complain that app02 takes too long to come back after patching. The manager asks how long each stage of the boot takes and which services are slowest.",
+  "task": "Record total boot time by stage, the slowest units, and the critical chain.",
+  "deliverable": "reports/boot-time.txt.",
+  "steps": [
+   "systemd-analyze > reports/boot-time.txt",
+   "systemd-analyze blame --no-pager | head -n 5 >> reports/boot-time.txt",
+   "systemd-analyze critical-chain --no-pager >> reports/boot-time.txt"
+  ],
+  "validation": "head -n 1 reports/boot-time.txt shows Startup finished in, with separate kernel and userspace times (UEFI systems also show firmware and loader).",
+  "trap": "The stages in systemd-analyze match the boot sequence: firmware, loader, kernel (including the initramfs), and userspace (systemd and services). blame lists units by start time, but parallel starts mean the slowest unit is not always the one delaying the boot; critical-chain shows the chain that did."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+  "Mixing up the boot order. It is firmware (POST), boot loader, kernel with initramfs, then init and services.",
+  "Thinking UEFI reads the MBR. BIOS runs the boot code in the MBR; UEFI loads a .efi file from the EFI system partition, mounted on /boot/efi.",
+  "Forgetting how to tell them apart. /sys/firmware/efi exists only on a system booted with UEFI.",
+  "Forgetting the MBR layout: 446 bytes of boot code, a 64-byte partition table, and the 55 aa signature, 512 bytes in total.",
+  "Thinking chain loading is a modern feature. It means a small first-stage loader passes control to a larger one, as the MBR does.",
+  "Confusing initrd and initramfs. The old initrd was a disk image; the modern initramfs is a cpio archive. The GRUB keyword is still initrd.",
+  "Forgetting why the initramfs exists: to give the kernel the drivers it needs to mount the real root filesystem.",
+  "Mixing up kernel file names. vmlinuz is the compressed kernel; initrd.img or initramfs is the RAM filesystem; both live in /boot.",
+  "Counting GRUB Legacy partitions from 1. GRUB Legacy counts disks and partitions from 0: (hd0,0) is /dev/sda1. GRUB2 counts partitions from 1.",
+  "Mixing up boot loaders. LILO is BIOS-only and obsolete, GRUB Legacy uses menu.lst or grub.conf, GRUB2 uses grub.cfg, and systemd-boot works only with UEFI.",
+  "Forgetting that systemd is PID 1 on modern systems, that its name is written in lowercase, and that Upstart used initctl.",
+  "Thinking SysVinit's default runlevel lives anywhere but /etc/inittab (the initdefault line).",
+  "Expecting dmesg to hold every boot message forever. The ring buffer is fixed in size; use journalctl -k, journalctl -b, or /var/log/boot.log.",
+  "Expecting journalctl -b -1 to work everywhere. Previous boots need a persistent journal in /var/log/journal."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes, using only your Linux Mint VM and ~/lpic1-section17. Every task is read-only: do not reboot, reinstall the boot loader, or change any boot setting."],
+ ["numbered", [
+  "Prove whether your VM booted with BIOS or UEFI and save the evidence to reports/challenge-firmware.txt.",
+  "Show the partition table type of your boot disk and, if there is one, where the EFI system partition is mounted.",
+  "Show the boot signature at the end of the first sector of the disk without writing to the disk.",
+  "Name the running kernel and the initramfs file that goes with it, and prove the initramfs contains the ext4 driver or explain why it might not.",
+  "Show the kernel and initramfs paths that the default GRUB2 entry loads and the kernel command line in use.",
+  "Explain which entry the sample GRUB Legacy menu.lst boots and which Linux device (hd0,0) refers to.",
+  "Identify PID 1, the default target, and the runlevel equivalent, and name the file a SysVinit system would use instead.",
+  "List the errors logged during the current boot and the total time each boot stage took."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each file, write one sentence naming the boot stage it gives evidence for."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+  "Hypervisor team request: “We are moving guests to new hosts. Tell us which ones booted with UEFI.”",
+  "Incident lead request: “After last night's patch, which kernel and initramfs does the default boot entry load?”",
+  "Storage vendor request: “Does your initramfs carry the driver for the disk controller, or is it built into the kernel?”",
+  "On-call request: “The old web01 server uses menu.lst with default=1. Which kernel will it boot, and from which partition?”",
+  "Compliance request: “Which init system does this server use, and what state does it boot into by default?”",
+  "Hardware team request: “The new network card did not come up. Find the kernel messages from boot that explain why.”",
+  "Manager request: “The server took ages to come back after patching. Show me which part of the boot was slow.”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+  "I can describe the boot sequence from power-on through firmware, boot loader, kernel, initramfs, and init to the login prompt.",
+  "I can tell whether a system booted with BIOS or UEFI and explain where each one finds its boot loader.",
+  "I can explain the MBR layout, its 446-byte boot code area, and chain loading.",
+  "I can find the EFI system partition and the boot loader files in /boot/efi/EFI.",
+  "I can identify the running kernel and its files in /boot, and explain what the z in vmlinuz means.",
+  "I can explain why the initramfs exists and list its contents with lsinitramfs.",
+  "I can find the kernel and initramfs a GRUB2 entry loads, and read the active command line in /proc/cmdline.",
+  "I can read a GRUB Legacy menu.lst and translate (hd0,0) into a Linux device name.",
+  "I can name the boot loaders LILO, GRUB Legacy, GRUB2, and systemd-boot and say where each is used.",
+  "I can identify the init system and default target, and map SysVinit runlevels to systemd targets.",
+  "I can read boot messages with dmesg, journalctl -b, journalctl -k, and /var/log/boot.log.",
+  "I can measure boot stages with systemd-analyze and find the slowest units."
+ ], 4]
+]

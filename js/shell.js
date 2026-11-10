@@ -1,0 +1,831 @@
+/* LPIC-1 Lab Trainer: simulated Bash shell with a small virtual filesystem.
+   It is not a real shell. It supports what the lessons teach: quoting, variables,
+   ~, {a,b} and * ? globbing, ; && || |, > >> 2> 2>> &> <, $(...), and history
+   expansion (!! !N !-N). Commands it doesn't know say so clearly. */
+(function () {
+  "use strict";
+  const LPIC = window.LPIC;
+
+  /* ------------------------------------------------------------------ VFS */
+
+  class VFS {
+    constructor() { this.root = { type: "dir", children: {}, mtime: Date.now() }; }
+
+    static split(path) { return path.split("/").filter(Boolean); }
+
+    resolve(path, cwd) {
+      const parts = path.startsWith("/") ? [] : VFS.split(cwd);
+      for (const p of VFS.split(path)) {
+        if (p === ".") continue;
+        if (p === "..") parts.pop(); else parts.push(p);
+      }
+      return "/" + parts.join("/");
+    }
+
+    get(abs) {
+      let node = this.root;
+      for (const p of VFS.split(abs)) {
+        if (!node || node.type !== "dir") return null;
+        node = node.children[p];
+      }
+      return node || null;
+    }
+
+    parentOf(abs) {
+      const parts = VFS.split(abs);
+      const name = parts.pop();
+      return { dir: this.get("/" + parts.join("/")), name };
+    }
+
+    mkdirp(abs) {
+      let node = this.root;
+      for (const p of VFS.split(abs)) {
+        if (!node.children[p]) node.children[p] = { type: "dir", children: {}, mtime: Date.now() };
+        node = node.children[p];
+        if (node.type !== "dir") throw new Error("Not a directory");
+      }
+      return node;
+    }
+
+    write(abs, content, append = false) {
+      const { dir, name } = this.parentOf(abs);
+      if (!dir || dir.type !== "dir") throw new Error("No such file or directory");
+      const cur = dir.children[name];
+      if (cur && cur.type === "dir") throw new Error("Is a directory");
+      if (cur && append) cur.content += content;
+      else dir.children[name] = { type: "file", content, mtime: Date.now() };
+      dir.children[name].mtime = Date.now();
+    }
+
+    remove(abs) {
+      const { dir, name } = this.parentOf(abs);
+      if (dir?.children[name]) delete dir.children[name];
+    }
+  }
+
+  /* ------------------------------------------------- reference data */
+
+  const BUILTINS = new Set(["cd", "pwd", "echo", "history", "help", "type", "exit", "export", "alias", "unalias",
+    "set", "unset", "source", ".", "read", "printf", "test", "[", "true", "false", "jobs", "fg", "bg", "kill",
+    "umask", "wait", "times", "hash", "enable", "shopt", "declare", "let", "local", "logout", "builtin", "command"]);
+  const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "function", "time", "[[", "]]", "!", "{", "}"]);
+  /* Builtins that also exist as programs on disk, so `which` finds them. */
+  const ALSO_EXTERNAL = new Set(["echo", "pwd", "printf", "test", "[", "true", "false", "kill"]);
+  const EXTERNAL = {
+    uname: "/usr/bin/uname", ls: "/usr/bin/ls", cat: "/usr/bin/cat", which: "/usr/bin/which", man: "/usr/bin/man",
+    info: "/usr/bin/info", bash: "/usr/bin/bash", date: "/usr/bin/date", mkdir: "/usr/bin/mkdir", touch: "/usr/bin/touch",
+    rm: "/usr/bin/rm", cp: "/usr/bin/cp", mv: "/usr/bin/mv", head: "/usr/bin/head", tail: "/usr/bin/tail",
+    wc: "/usr/bin/wc", grep: "/usr/bin/grep", whoami: "/usr/bin/whoami", hostname: "/usr/bin/hostname",
+    nano: "/usr/bin/nano", vi: "/usr/bin/vi", less: "/usr/bin/less", clear: "/usr/bin/clear", sleep: "/usr/bin/sleep",
+    whatis: "/usr/bin/whatis", apropos: "/usr/bin/apropos", sort: "/usr/bin/sort", rmdir: "/usr/bin/rmdir",
+    echo: "/usr/bin/echo", pwd: "/usr/bin/pwd", printf: "/usr/bin/printf", test: "/usr/bin/test", "[": "/usr/bin/[",
+    true: "/usr/bin/true", false: "/usr/bin/false", kill: "/usr/bin/kill", sudo: "/usr/bin/sudo",
+  };
+  const ALIASES = { ls: "ls --color=auto", grep: "grep --color=auto", ll: "ls -alF", la: "ls -A", l: "ls -CF" };
+
+  const DEFAULT_CANNED = {
+    "uname": "Linux",
+    "uname -s": "Linux",
+    "uname -n": "linux-mint",
+    "uname -r": "6.8.0-44-generic",
+    "uname -v": "#44-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug 22 13:54:21 UTC 2026",
+    "uname -m": "x86_64",
+    "uname -o": "GNU/Linux",
+    "uname -a": "Linux linux-mint 6.8.0-44-generic #44-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug 22 13:54:21 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+    "uname --all": "Linux linux-mint 6.8.0-44-generic #44-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug 22 13:54:21 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+    "uname --kernel-release": "6.8.0-44-generic",
+    "uname --kernel-name": "Linux",
+    "uname --kernel-version": "#44-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug 22 13:54:21 UTC 2026",
+    "bash --version":
+      "GNU bash, version 5.2.21(1)-release (x86_64-pc-linux-gnu)\nCopyright (C) 2022 Free Software Foundation, Inc.\n" +
+      "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n\n" +
+      "This is free software; you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.",
+    "hostname": "linux-mint",
+  };
+
+  /* --------------------------------------------------------------- Shell */
+
+  class Shell {
+    /* opts: { user, host, cwd, files, canned, history, docs, unsupported } */
+    constructor(opts = {}) {
+      this.user = opts.user || "max";
+      this.host = opts.host || "linux-mint";
+      this.home = "/home/" + this.user;
+      this.vfs = new VFS();
+      this.env = { HOME: this.home, USER: this.user, LOGNAME: this.user, SHELL: "/bin/bash", HOSTNAME: this.host,
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", LANG: "en_US.UTF-8", TERM: "xterm-256color", BASH_VERSION: "5.2.21(1)-release" };
+      this.canned = { ...DEFAULT_CANNED, ...(opts.canned || {}) };
+      this.docs = opts.docs || LPIC.docs || {};
+      this.unsupported = opts.unsupported || null;
+      this.hashed = new Set();
+      this.history = [...(opts.history || [])];
+      this.lastStatus = 0;
+
+      // Base system tree.
+      ["/etc", "/usr/bin", "/usr/sbin", "/usr/share", "/var/log", "/tmp", "/dev", "/proc", "/boot", "/opt", "/srv", "/root"]
+        .forEach((d) => this.vfs.mkdirp(d));
+      this.vfs.write("/etc/hostname", this.host + "\n");
+      this.vfs.write("/etc/os-release", 'NAME="Linux Mint"\nVERSION="22 (Wilma)"\nID=linuxmint\nID_LIKE="ubuntu debian"\n');
+      this.vfs.write("/etc/shells", "/bin/sh\n/bin/bash\n/usr/bin/bash\n/bin/dash\n");
+      ["passwd", "group", "fstab", "hosts", "profile", "bash.bashrc"].forEach((f) => this.vfs.write("/etc/" + f, ""));
+      Object.keys(EXTERNAL).forEach((c) => this.vfs.write(EXTERNAL[c], ""));
+      this.vfs.mkdirp(this.home);
+      this.vfs.write(this.home + "/.bashrc", "# ~/.bashrc\n");
+      this.vfs.write(this.home + "/.bash_history", "");
+
+      for (const [p, content] of Object.entries(opts.files || {})) {
+        const abs = this.vfs.resolve(this.expandTilde(p), this.home);
+        if (p.endsWith("/") || content === null) this.vfs.mkdirp(abs);
+        else { this.vfs.mkdirp(abs.replace(/\/[^/]*$/, "") || "/"); this.vfs.write(abs, content); }
+      }
+      this.cwd = this.vfs.resolve(this.expandTilde(opts.cwd || "~"), this.home);
+      this.vfs.mkdirp(this.cwd);
+      this.env.PWD = this.cwd;
+    }
+
+    expandTilde(p) { return p === "~" ? this.home : p.startsWith("~/") ? this.home + p.slice(1) : p; }
+    abs(p) { return this.vfs.resolve(this.expandTilde(p), this.cwd); }
+    displayCwd() { return this.cwd === this.home ? "~" : this.cwd.startsWith(this.home + "/") ? "~" + this.cwd.slice(this.home.length) : this.cwd; }
+    prompt() { return `${this.user}@${this.host}:${this.displayCwd()}$`; }
+
+    /* ----------------------------------------------------------- run a line
+       Returns { out: [{text, cls}], events: [], pager, clear, expanded } */
+    run(raw) {
+      const res = { out: [], events: [], pager: null, clear: false, expanded: null, line: raw };
+      let line = raw.replace(/\s+$/, "");
+      if (!line.trim()) return res;
+
+      // History expansion (outside single quotes).
+      const hx = this.expandHistory(line);
+      if (hx.error) { res.out.push({ text: hx.error, cls: "terminal-error" }); return res; }
+      if (hx.changed) { line = hx.line; res.out.push({ text: line, cls: "terminal-muted" }); res.events.push({ type: "history-expand", from: raw.trim(), to: line.trim() }); }
+      res.expanded = line.trim();
+      if (!/^\s/.test(raw)) this.history.push(line.trim());
+
+      let tokens;
+      try { tokens = this.tokenize(line); }
+      catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return res; }
+
+      // Split into && / || / ; lists of pipelines.
+      const lists = [];
+      let cur = [], op = null;
+      for (const t of tokens) {
+        if (t.op === ";" || t.op === "&&" || t.op === "||") { lists.push({ op, tokens: cur }); op = t.op; cur = []; }
+        else cur.push(t);
+      }
+      lists.push({ op, tokens: cur });
+
+      for (const item of lists) {
+        if (!item.tokens.length) continue;
+        if (item.op === "&&" && this.lastStatus !== 0) continue;
+        if (item.op === "||" && this.lastStatus === 0) continue;
+        const r = this.runPipeline(item.tokens, res);
+        if (r.stdout) res.out.push(...r.stdout.replace(/\n$/, "").split("\n").map((text) => ({ text })));
+        if (res.pager || res.clear || res.exit) break;
+      }
+      return res;
+    }
+
+    expandHistory(line) {
+      let out = "", changed = false, inSingle = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === "'") inSingle = !inSingle;
+        if (c === "!" && !inSingle && i + 1 < line.length && !/[\s=(]/.test(line[i + 1])) {
+          const rest = line.slice(i + 1);
+          let m, cmd = null;
+          if (rest[0] === "!") { cmd = this.history[this.history.length - 1]; i += 1; }
+          else if ((m = rest.match(/^-?\d+/))) {
+            const n = parseInt(m[0], 10);
+            cmd = n < 0 ? this.history[this.history.length + n] : this.history[n - 1];
+            if (cmd === undefined) return { error: `bash: !${m[0]}: event not found` };
+            i += m[0].length;
+          } else if ((m = rest.match(/^[A-Za-z][\w.-]*/))) {
+            cmd = [...this.history].reverse().find((h) => h.startsWith(m[0]));
+            if (cmd === undefined) return { error: `bash: !${m[0]}: event not found` };
+            i += m[0].length;
+          } else { out += c; continue; }
+          if (cmd === undefined || cmd === null) return { error: "bash: !!: event not found" };
+          out += cmd; changed = true; continue;
+        }
+        out += c;
+      }
+      return { line: out, changed };
+    }
+
+    /* Tokens: {word, glob, brace} or {op}. Handles quotes, $VAR, ${VAR}, $?, $(cmd), ~. */
+    tokenize(line) {
+      const tokens = [];
+      let i = 0, word = null;
+      const start = () => { if (!word) word = { word: "", glob: false, brace: false, quoted: false }; };
+      const push = () => { if (word) { tokens.push(word); word = null; } };
+      const ops = ["&>", "2>>", "2>&1", "2>", ">>", "&&", "||", ">", "<", "|", ";"];
+      while (i < line.length) {
+        const c = line[i];
+        if (/\s/.test(c)) { push(); i++; continue; }
+        if (c === "#" && !word) break;
+        const op = ops.find((o) => line.startsWith(o, i) && (o !== "2>" && o !== "2>>" && o !== "2>&1" || !word));
+        if (op) { push(); tokens.push({ op }); i += op.length; continue; }
+        start();
+        if (c === "'") {
+          const j = line.indexOf("'", i + 1);
+          if (j < 0) throw new Error("unexpected EOF while looking for matching `''");
+          word.word += line.slice(i + 1, j); word.quoted = true; i = j + 1; continue;
+        }
+        if (c === '"') {
+          i++; word.quoted = true;
+          while (i < line.length && line[i] !== '"') {
+            if (line[i] === "\\" && /["\\$`]/.test(line[i + 1] || "")) { word.word += line[i + 1]; i += 2; continue; }
+            if (line[i] === "$") { const r = this.dollar(line, i); word.word += r.value; i = r.end; continue; }
+            word.word += line[i++];
+          }
+          if (line[i] !== '"') throw new Error("unexpected EOF while looking for matching `\"'");
+          i++; continue;
+        }
+        if (c === "\\") { word.word += line[i + 1] || ""; word.quoted = true; i += 2; continue; }
+        if (c === "$") { const r = this.dollar(line, i); word.word += r.value; i = r.end; continue; }
+        if (c === "~" && word.word === "" && (i + 1 >= line.length || /[\/\s]/.test(line[i + 1]))) { word.word += this.home; i++; continue; }
+        if (c === "*" || c === "?" || c === "[") word.glob = true;
+        if (c === "{") word.brace = true;
+        word.word += c; i++;
+      }
+      push();
+      return tokens;
+    }
+
+    dollar(line, i) {
+      const rest = line.slice(i + 1);
+      let m;
+      if (rest.startsWith("(")) {
+        let depth = 0, j = i + 1;
+        for (; j < line.length; j++) {
+          if (line[j] === "(") depth++;
+          else if (line[j] === ")" && --depth === 0) break;
+        }
+        const inner = line.slice(i + 2, j);
+        const sub = this.runCapture(inner);
+        return { value: sub.replace(/\n+$/, ""), end: j + 1 };
+      }
+      if ((m = rest.match(/^\{(\w+)\}/))) return { value: this.env[m[1]] ?? "", end: i + 1 + m[0].length };
+      if ((m = rest.match(/^\w+/))) return { value: this.env[m[0]] ?? "", end: i + 1 + m[0].length };
+      if (rest[0] === "?") return { value: String(this.lastStatus), end: i + 2 };
+      if (rest[0] === "$") return { value: "4242", end: i + 2 };
+      return { value: "$", end: i + 1 };
+    }
+
+    runCapture(line) {
+      const saved = this.history.length;
+      const r = this.run(line);
+      this.history.length = saved;
+      return r.out.filter((o) => o.cls !== "terminal-error" && o.cls !== "terminal-muted").map((o) => o.text).join("\n");
+    }
+
+    expandBraces(w) {
+      const m = w.match(/^(.*?)\{([^{}]*,[^{}]*)\}(.*)$/);
+      if (!m) return [w];
+      return m[2].split(",").flatMap((part) => this.expandBraces(m[1] + part + m[3]));
+    }
+
+    expandGlob(pattern) {
+      const isAbs = pattern.startsWith("/");
+      const parts = VFS.split(pattern);
+      let paths = [isAbs ? "/" : ""];
+      for (const part of parts) {
+        const next = [];
+        for (const base of paths) {
+          if (!/[*?[]/.test(part)) { next.push(base + (base && !base.endsWith("/") ? "/" : "") + part); continue; }
+          const dirAbs = this.vfs.resolve(base || ".", this.cwd);
+          const dir = this.vfs.get(dirAbs);
+          if (!dir || dir.type !== "dir") continue;
+          const re = new RegExp("^" + part.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+          Object.keys(dir.children).sort().forEach((name) => {
+            if (name.startsWith(".") && !part.startsWith(".")) return;
+            if (re.test(name)) next.push(base + (base && !base.endsWith("/") ? "/" : "") + name);
+          });
+        }
+        paths = next;
+      }
+      return paths.filter((p) => this.vfs.get(this.vfs.resolve(p, this.cwd)));
+    }
+
+    /* Build argv + redirects, run each stage of a pipeline. */
+    runPipeline(tokens, res) {
+      const stages = [[]];
+      for (const t of tokens) { if (t.op === "|") stages.push([]); else stages[stages.length - 1].push(t); }
+      let stdin = "";
+      let final = { stdout: "", status: 0 };
+      for (let s = 0; s < stages.length; s++) {
+        const words = [], redirs = [];
+        const st = stages[s];
+        for (let k = 0; k < st.length; k++) {
+          const t = st[k];
+          if (t.op) {
+            if (t.op === "2>&1") { redirs.push({ op: "2>&1" }); continue; }
+            const target = st[k + 1];
+            if (!target || target.op) { res.out.push({ text: "bash: syntax error near unexpected token `newline'", cls: "terminal-error" }); this.lastStatus = 2; return { stdout: "" }; }
+            redirs.push({ op: t.op, target: target.word }); k++; continue;
+          }
+          let list = t.brace && !t.quoted ? this.expandBraces(t.word) : [t.word];
+          if (t.glob) list = list.flatMap((w) => { const g = this.expandGlob(w); return g.length ? g : [w]; });
+          words.push(...list);
+        }
+        // Input redirect
+        const inR = redirs.find((r) => r.op === "<");
+        if (inR) {
+          const node = this.vfs.get(this.abs(inR.target));
+          if (!node || node.type !== "file") { res.out.push({ text: `bash: ${inR.target}: No such file or directory`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" }; }
+          stdin = node.content;
+        }
+        const r = this.exec(words, stdin, res);
+        let out = r.stdout || "", err = r.stderr || "";
+        for (const rd of redirs) {
+          if (rd.op === "2>&1") { out += err; err = ""; continue; }
+          if (rd.op === "<") continue;
+          const devnull = rd.target === "/dev/null";
+          try {
+            if (rd.op === ">" || rd.op === ">>") { if (!devnull) this.vfs.write(this.abs(rd.target), out, rd.op === ">>"); out = ""; }
+            else if (rd.op === "2>" || rd.op === "2>>") { if (!devnull) this.vfs.write(this.abs(rd.target), err, rd.op === "2>>"); err = ""; }
+            else if (rd.op === "&>") { if (!devnull) this.vfs.write(this.abs(rd.target), out + err); out = ""; err = ""; }
+            res.events.push({ type: "file-written", path: this.abs(rd.target) });
+          } catch (e) {
+            res.out.push({ text: `bash: ${rd.target}: ${e.message}`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" };
+          }
+        }
+        if (err) res.out.push(...err.replace(/\n$/, "").split("\n").map((text) => ({ text, cls: "terminal-error" })));
+        this.lastStatus = r.status || 0;
+        stdin = out;
+        final = { stdout: s === stages.length - 1 ? out : "", status: r.status };
+      }
+      return final;
+    }
+
+    /* --------------------------------------------------------- commands */
+    exec(argv, stdin, res) {
+      if (!argv.length) return { status: 0 };
+      let [name, ...args] = argv;
+      // Variable assignment: NAME=value
+      if (/^[A-Za-z_]\w*=/.test(name) && !args.length) { const k = name.split("=")[0]; this.env[k] = name.slice(k.length + 1); return {}; }
+      if (name === "sudo") {
+        if (!args.length) return { stderr: "usage: sudo command", status: 1 };
+        res.events.push({ type: "sudo", cmd: args.join(" ") });
+        [name, ...args] = args;
+      }
+      // Aliases (only the ls/grep color aliases matter here)
+      const key = [name, ...args].join(" ");
+      if (Object.hasOwn(this.canned, key)) {
+        if (EXTERNAL[name]) this.hashed.add(name);
+        res.events.push({ type: "command", name, args });
+        return { stdout: this.canned[key] + "\n" };
+      }
+      const fn = Shell.commands[name];
+      if (fn) {
+        if (EXTERNAL[name] && !BUILTINS.has(name)) this.hashed.add(name);
+        res.events.push({ type: "command", name, args });
+        try { return fn.call(this, args, stdin, res) || {}; }
+        catch (e) { return { stderr: `${name}: ${e.message}`, status: 1 }; }
+      }
+      if (this.unsupported && name === this.unsupported.prefix) {
+        return { stderr: `${name}: that option or format isn't part of this lesson.\n${this.unsupported.message}`, status: 1 };
+      }
+      if (EXTERNAL[name]) return { stderr: `${name}: this command is real, but this lesson's simulation doesn't run it.`, status: 127 };
+      return { stderr: `${name}: command not found`, status: 127 };
+    }
+  }
+
+  /* Option parser: returns { flags:Set, values:{}, rest:[] }. valueOpts take an argument. */
+  function opts(args, valueOpts = []) {
+    const flags = new Set(), values = {}, rest = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === "--") { rest.push(...args.slice(i + 1)); break; }
+      if (a.startsWith("--")) { const [k, v] = a.slice(2).split("="); if (v !== undefined) values[k] = v; else flags.add(k); continue; }
+      if (a.startsWith("-") && a.length > 1 && !/^-\d+$/.test(a)) {
+        for (let j = 1; j < a.length; j++) {
+          const f = a[j];
+          if (valueOpts.includes(f)) { values[f] = a.slice(j + 1) || args[++i]; break; }
+          flags.add(f);
+        }
+        continue;
+      }
+      rest.push(a);
+    }
+    return { flags, values, rest };
+  }
+
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const pad = (n, w = 2, ch = "0") => String(n).padStart(w, ch);
+  function lsDate(ms) { const d = new Date(ms); return `${MONTHS[d.getMonth()]} ${pad(d.getDate(), 2, " ")} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+
+  Shell.commands = {
+    pwd() { return { stdout: this.cwd + "\n" }; },
+
+    cd(args) {
+      const target = args[0] === undefined || args[0] === "~" ? this.home : args[0] === "-" ? (this.env.OLDPWD || this.cwd) : args[0];
+      const abs = this.abs(target);
+      const node = this.vfs.get(abs);
+      if (!node) return { stderr: `bash: cd: ${args[0]}: No such file or directory`, status: 1 };
+      if (node.type !== "dir") return { stderr: `bash: cd: ${args[0]}: Not a directory`, status: 1 };
+      this.env.OLDPWD = this.cwd; this.cwd = abs; this.env.PWD = abs;
+      return args[0] === "-" ? { stdout: abs + "\n" } : {};
+    },
+
+    ls(args) {
+      const o = opts(args.filter((a) => !a.startsWith("--color")));
+      const all = o.flags.has("a"), almost = o.flags.has("A"), long = o.flags.has("l"), dirOnly = o.flags.has("d");
+      const one = o.flags.has("1"), recursive = o.flags.has("R"), classify = o.flags.has("F");
+      const targets = o.rest.length ? o.rest : ["."];
+      const out = [], err = [];
+      const fmt = (name, node) => {
+        const suffix = classify && node.type === "dir" ? "/" : "";
+        if (!long) return name + suffix;
+        const isDir = node.type === "dir";
+        const size = isDir ? 4096 : (node.content || "").length;
+        const perms = node.mode || (isDir ? "drwxr-xr-x" : "-rw-r--r--");
+        const links = isDir ? 2 : 1;
+        return `${perms} ${links} ${this.user} ${this.user} ${pad(size, 5, " ")} ${lsDate(node.mtime)} ${name}${suffix}`;
+      };
+      const listDir = (path, node) => {
+        let names = Object.keys(node.children).sort((a, b) => a.replace(/^\./, "").localeCompare(b.replace(/^\./, "")));
+        if (!all && !almost) names = names.filter((n) => !n.startsWith("."));
+        const entries = names.map((n) => fmt(n, node.children[n]));
+        if (all) entries.unshift(fmt(".", node), fmt("..", node));
+        const lines = [];
+        if (long) lines.push(`total ${names.length * 4}`);
+        if (long || one) lines.push(...entries); else if (entries.length) lines.push(entries.join("  "));
+        return lines;
+      };
+      const files = [], dirs = [];
+      for (const t of targets) {
+        const node = this.vfs.get(this.abs(t));
+        if (!node) { err.push(`ls: cannot access '${t}': No such file or directory`); continue; }
+        if (node.type === "file" || dirOnly) files.push(fmt(t, node)); else dirs.push([t, node]);
+      }
+      if (files.length) out.push(...(long || one ? files : [files.join("  ")]));
+      const multi = targets.length > 1 || recursive;
+      const walk = (t, node, first) => {
+        if (multi) { if (out.length || !first) out.push(""); out.push(`${t}:`); }
+        out.push(...listDir(t, node));
+        if (recursive) Object.keys(node.children).sort().forEach((n) => {
+          const c = node.children[n];
+          if (c.type === "dir" && (all || !n.startsWith("."))) walk(`${t}/${n}`, c, false);
+        });
+      };
+      dirs.forEach(([t, node], i) => walk(t, node, i === 0 && !files.length));
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 2 : 0 };
+    },
+
+    mkdir(args) {
+      const o = opts(args);
+      const err = [];
+      for (const p of o.rest) {
+        const abs = this.abs(p);
+        if (this.vfs.get(abs)) { if (!o.flags.has("p")) err.push(`mkdir: cannot create directory '${p}': File exists`); continue; }
+        const { dir } = this.vfs.parentOf(abs);
+        if (!dir && !o.flags.has("p")) { err.push(`mkdir: cannot create directory '${p}': No such file or directory`); continue; }
+        this.vfs.mkdirp(abs);
+      }
+      if (!o.rest.length) err.push("mkdir: missing operand");
+      return { stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    rmdir(args) {
+      const err = [];
+      for (const p of args) {
+        const n = this.vfs.get(this.abs(p));
+        if (!n) err.push(`rmdir: failed to remove '${p}': No such file or directory`);
+        else if (n.type !== "dir") err.push(`rmdir: failed to remove '${p}': Not a directory`);
+        else if (Object.keys(n.children).length) err.push(`rmdir: failed to remove '${p}': Directory not empty`);
+        else this.vfs.remove(this.abs(p));
+      }
+      return { stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    touch(args) {
+      const err = [];
+      for (const p of opts(args).rest) {
+        const abs = this.abs(p);
+        const n = this.vfs.get(abs);
+        if (n) { n.mtime = Date.now(); continue; }
+        try { this.vfs.write(abs, ""); } catch { err.push(`touch: cannot touch '${p}': No such file or directory`); }
+      }
+      return { stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    rm(args) {
+      const o = opts(args);
+      const err = [], out = [];
+      for (const p of o.rest) {
+        const abs = this.abs(p);
+        const n = this.vfs.get(abs);
+        if (!n) { if (!o.flags.has("f")) err.push(`rm: cannot remove '${p}': No such file or directory`); continue; }
+        if (n.type === "dir" && !o.flags.has("r") && !o.flags.has("R")) { err.push(`rm: cannot remove '${p}': Is a directory`); continue; }
+        this.vfs.remove(abs);
+        if (o.flags.has("v")) out.push(`removed '${p}'`);
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    cp(args) {
+      const o = opts(args);
+      if (o.rest.length < 2) return { stderr: "cp: missing destination file operand", status: 1 };
+      const dest = o.rest.pop();
+      const dAbs = this.abs(dest), dNode = this.vfs.get(dAbs);
+      for (const src of o.rest) {
+        const n = this.vfs.get(this.abs(src));
+        if (!n) return { stderr: `cp: cannot stat '${src}': No such file or directory`, status: 1 };
+        if (n.type === "dir") return { stderr: `cp: -r not specified; omitting directory '${src}'`, status: 1 };
+        const target = dNode && dNode.type === "dir" ? dAbs + "/" + src.split("/").pop() : dAbs;
+        this.vfs.write(target, n.content);
+      }
+      return {};
+    },
+
+    mv(args) {
+      const o = opts(args);
+      if (o.rest.length < 2) return { stderr: "mv: missing destination file operand", status: 1 };
+      const dest = o.rest.pop();
+      const dAbs = this.abs(dest), dNode = this.vfs.get(dAbs);
+      for (const src of o.rest) {
+        const sAbs = this.abs(src), n = this.vfs.get(sAbs);
+        if (!n) return { stderr: `mv: cannot stat '${src}': No such file or directory`, status: 1 };
+        const target = dNode && dNode.type === "dir" ? dAbs + "/" + src.split("/").pop() : dAbs;
+        const { dir, name } = this.vfs.parentOf(target);
+        if (!dir) return { stderr: `mv: cannot move '${src}': No such file or directory`, status: 1 };
+        this.vfs.remove(sAbs); dir.children[name] = n;
+      }
+      return {};
+    },
+
+    cat(args, stdin) {
+      const o = opts(args);
+      if (!o.rest.length) return { stdout: stdin };
+      let out = "", err = [];
+      for (const p of o.rest) {
+        if (p === "-") { out += stdin; continue; }
+        const n = this.vfs.get(this.abs(p));
+        if (!n) err.push(`cat: ${p}: No such file or directory`);
+        else if (n.type === "dir") err.push(`cat: ${p}: Is a directory`);
+        else out += n.content;
+      }
+      if (o.flags.has("n")) out = out.replace(/\n$/, "").split("\n").map((l, i) => `${pad(i + 1, 6, " ")}\t${l}`).join("\n") + "\n";
+      return { stdout: out, stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    echo(args) {
+      let n = false, e = false;
+      while (args.length && /^-[neE]+$/.test(args[0])) { if (args[0].includes("n")) n = true; if (args[0].includes("e")) e = true; args = args.slice(1); }
+      let s = args.join(" ");
+      if (e) s = s.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+      return { stdout: s + (n ? "" : "\n") };
+    },
+
+    printf(args) {
+      if (!args.length) return { stderr: "printf: usage: printf [-v var] format [arguments]", status: 2 };
+      let [fmt, ...rest] = args, i = 0;
+      const s = fmt.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/%[sd]/g, () => rest[i++] ?? "");
+      return { stdout: s };
+    },
+
+    date() {
+      const d = new Date();
+      const tz = (d.toLocaleTimeString("en-US", { timeZoneName: "short" }).split(" ").pop()) || "UTC";
+      return { stdout: `${DAYS[d.getDay()]} ${MONTHS[d.getMonth()]} ${pad(d.getDate(), 2, " ")} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${tz} ${d.getFullYear()}\n` };
+    },
+
+    whoami() { return { stdout: this.user + "\n" }; },
+    hostname() { return { stdout: this.host + "\n" }; },
+    true() { return { status: 0 }; },
+    false() { return { status: 1 }; },
+    clear(args, stdin, res) { res.clear = true; return {}; },
+    exit(args, stdin, res) { return { stderr: "exit: this practice terminal stays open. Use Clear to start fresh.", status: 0 }; },
+    sleep() { return {}; },
+
+    export(args) {
+      for (const a of args) { const k = a.split("=")[0]; if (a.includes("=")) this.env[k] = a.slice(k.length + 1); }
+      return {};
+    },
+    unset(args) { args.forEach((k) => delete this.env[k]); return {}; },
+    env() { return { stdout: Object.entries(this.env).map(([k, v]) => `${k}=${v}`).join("\n") + "\n" }; },
+    printenv(args) { return args.length ? { stdout: args.map((k) => this.env[k] ?? "").join("\n") + "\n" } : Shell.commands.env.call(this); },
+
+    head(args, stdin) { return headTail.call(this, "head", args, stdin); },
+    tail(args, stdin) { return headTail.call(this, "tail", args, stdin); },
+
+    wc(args, stdin) {
+      const o = opts(args);
+      const count = (txt) => ({ l: (txt.match(/\n/g) || []).length, w: (txt.match(/\S+/g) || []).length, c: txt.length });
+      const which = ["l", "w", "c"].filter((f) => o.flags.has(f));
+      const show = which.length ? which : ["l", "w", "c"];
+      const line = (r, name) => show.map((f) => (show.length > 1 ? pad(r[f], 2, " ") : r[f])).join(" ") + (name ? " " + name : "");
+      if (!o.rest.length) return { stdout: line(count(stdin)) + "\n" };
+      const out = [], err = [];
+      for (const p of o.rest) {
+        const n = this.vfs.get(this.abs(p));
+        if (!n || n.type !== "file") { err.push(`wc: ${p}: No such file or directory`); continue; }
+        out.push(line(count(n.content), p));
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    grep(args, stdin) {
+      const o = opts(args.filter((a) => !a.startsWith("--color")), ["e"]);
+      const pattern = o.values.e ?? o.rest.shift();
+      if (pattern === undefined) return { stderr: "Usage: grep [OPTION]... PATTERNS [FILE]...", status: 2 };
+      let re;
+      try { re = new RegExp(o.flags.has("F") ? pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : pattern.replace(/\\</g, "\\b").replace(/\\>/g, "\\b"), o.flags.has("i") ? "i" : ""); }
+      catch { return { stderr: "grep: Invalid regular expression", status: 2 }; }
+      const sources = o.rest.length ? o.rest.map((p) => [p, this.vfs.get(this.abs(p))]) : [[null, { type: "file", content: stdin }]];
+      const out = [], err = [];
+      let total = 0;
+      for (const [name, n] of sources) {
+        if (!n) { err.push(`grep: ${name}: No such file or directory`); continue; }
+        if (n.type === "dir") { err.push(`grep: ${name}: Is a directory`); continue; }
+        const lines = n.content.replace(/\n$/, "").split("\n");
+        let c = 0;
+        lines.forEach((l, idx) => {
+          if (n.content === "") return;
+          if (re.test(l) !== o.flags.has("v")) {
+            c++;
+            if (!o.flags.has("c") && !o.flags.has("l")) out.push((sources.length > 1 ? name + ":" : "") + (o.flags.has("n") ? idx + 1 + ":" : "") + l);
+          }
+        });
+        if (o.flags.has("c")) out.push((sources.length > 1 ? name + ":" : "") + c);
+        if (o.flags.has("l") && c) out.push(name);
+        total += c;
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 2 : total ? 0 : 1 };
+    },
+
+    sort(args, stdin) {
+      const o = opts(args);
+      let text = stdin;
+      if (o.rest.length) text = o.rest.map((p) => this.vfs.get(this.abs(p))?.content || "").join("");
+      let lines = text.replace(/\n$/, "").split("\n");
+      lines.sort(o.flags.has("n") ? (a, b) => parseFloat(a) - parseFloat(b) : (a, b) => a.localeCompare(b));
+      if (o.flags.has("r")) lines.reverse();
+      return { stdout: text ? lines.join("\n") + "\n" : "" };
+    },
+
+    nano(args) {
+      return { stderr: "nano: full-screen editors don't run in this practice terminal.\nTo add a line to a file, use: echo 'your text' >> FILE", status: 1 };
+    },
+    vi(args) { return Shell.commands.nano.call(this, args); },
+    vim(args) { return Shell.commands.nano.call(this, args); },
+
+    /* ------------ type / which / help / man / info / history ------------ */
+    type(args) {
+      const o = opts(args);
+      const out = [], err = [];
+      for (const n of o.rest) {
+        if (o.flags.has("t")) {
+          const kind = ALIASES[n] ? "alias" : KEYWORDS.has(n) ? "keyword" : BUILTINS.has(n) ? "builtin" : EXTERNAL[n] ? "file" : null;
+          if (kind) out.push(kind); else err.push("");
+          continue;
+        }
+        const found = [];
+        if (ALIASES[n]) found.push(`${n} is aliased to \`${ALIASES[n]}'`);
+        if (KEYWORDS.has(n)) found.push(`${n} is a shell keyword`);
+        if (BUILTINS.has(n)) found.push(`${n} is a shell builtin`);
+        if (EXTERNAL[n] && (!BUILTINS.has(n) || o.flags.has("a"))) {
+          if (o.flags.has("a")) { found.push(`${n} is ${EXTERNAL[n]}`); found.push(`${n} is ${EXTERNAL[n].replace("/usr", "")}`); }
+          else found.push(this.hashed.has(n) ? `${n} is hashed (${EXTERNAL[n]})` : `${n} is ${EXTERNAL[n]}`);
+        }
+        if (!found.length) { err.push(`bash: type: ${n}: not found`); continue; }
+        out.push(...(o.flags.has("a") ? found : [found[0]]));
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.filter(Boolean).join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    which(args) {
+      const o = opts(args);
+      const out = [];
+      let missing = false;
+      for (const n of o.rest) {
+        if (EXTERNAL[n] && (!BUILTINS.has(n) || ALSO_EXTERNAL.has(n))) {
+          out.push(EXTERNAL[n]);
+          if (o.flags.has("a")) out.push(EXTERNAL[n].replace("/usr", ""));
+        } else missing = true;
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", status: missing ? 1 : 0 };
+    },
+
+    help(args) {
+      const topics = this.docs.help || {};
+      const o = opts(args);
+      if (!o.rest.length) return { stdout: topics[""] || "GNU bash, version 5.2.21(1)-release\nType `help name' to find out more about the function `name'.\n" };
+      const out = [], err = [];
+      for (const t of o.rest) {
+        if (topics[t]) out.push(o.flags.has("d") ? `${t} - ${topics[t].split("\n")[1].trim()}` : o.flags.has("s") ? topics[t].split("\n")[0] : topics[t].replace(/\n$/, ""));
+        else err.push(`bash: help: no help topics match \`${t}'.  Try \`help help' or \`man -k ${t}' or \`info ${t}'.`);
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 1 : 0 };
+    },
+
+    man(args, stdin, res) {
+      const o = opts(args);
+      const pages = this.docs.man || {};
+      if (o.flags.has("k")) return Shell.commands.apropos.call(this, o.rest);
+      if (o.flags.has("f")) return Shell.commands.whatis.call(this, o.rest);
+      const page = o.rest[o.rest.length - 1];
+      if (!page) return { stderr: "What manual page do you want?\nFor example, try 'man man'.", status: 1 };
+      if (!pages[page]) return { stderr: `No manual entry for ${page}`, status: 16 };
+      res.pager = { kind: "man", page, title: `Manual page ${page}(${pages[page].section || 1})`, text: pages[page].text };
+      res.events.push({ type: "pager-open", kind: "man", page });
+      return {};
+    },
+
+    info(args, stdin, res) {
+      const page = args[args.length - 1] || "dir";
+      const pages = this.docs.info || {};
+      const manPages = this.docs.man || {};
+      let text = pages[page]?.text;
+      if (!text && manPages[page]) text = manPages[page].text; // info falls back to the man page
+      if (!text) return { stderr: `info: No menu item '${page}' in node '(dir)Top'`, status: 1 };
+      res.pager = { kind: "info", page, title: `info ${page}`, text };
+      res.events.push({ type: "pager-open", kind: "info", page });
+      return {};
+    },
+
+    less(args, stdin, res) {
+      const p = args[args.length - 1];
+      const n = p ? this.vfs.get(this.abs(p)) : { type: "file", content: stdin };
+      if (!n) return { stderr: `${p}: No such file or directory`, status: 1 };
+      res.pager = { kind: "less", page: p || "(stdin)", title: p || "less", text: n.content };
+      res.events.push({ type: "pager-open", kind: "less", page: p });
+      return {};
+    },
+
+    whatis(args) {
+      const pages = this.docs.man || {};
+      const out = [], err = [];
+      for (const n of args) {
+        if (pages[n]) out.push(`${(n + " (" + (pages[n].section || 1) + ")").padEnd(20)} - ${pages[n].summary}`);
+        else err.push(`${n}: nothing appropriate.`);
+      }
+      return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 16 : 0 };
+    },
+
+    apropos(args) {
+      const pages = this.docs.man || {};
+      const kw = (args[0] || "").toLowerCase();
+      const out = Object.entries(pages).filter(([n, p]) => n.includes(kw) || (p.summary || "").toLowerCase().includes(kw))
+        .map(([n, p]) => `${(n + " (" + (p.section || 1) + ")").padEnd(20)} - ${p.summary}`);
+      return out.length ? { stdout: out.join("\n") + "\n" } : { stderr: `${args[0]}: nothing appropriate.`, status: 16 };
+    },
+
+    history(args) {
+      const histFile = this.home + "/.bash_history";
+      const a = args[0];
+      if (a === "--help") return Shell.commands.help.call(this, ["history"]);
+      if (a === "-c") { this.history = []; return {}; }
+      if (a === "-w") { this.vfs.write(histFile, this.history.map((h) => h + "\n").join("")); return {}; }
+      if (a === "-a") { this.vfs.write(histFile, this.history.map((h) => h + "\n").join(""), true); return {}; }
+      if (a === "-r") { const f = this.vfs.get(histFile); if (f) this.history.push(...f.content.split("\n").filter(Boolean)); return {}; }
+      if (a === "-d") { const n = parseInt(args[1], 10); if (!(n >= 1 && n <= this.history.length)) return { stderr: `bash: history: ${args[1]}: history position out of range`, status: 1 }; this.history.splice(n - 1, 1); return {}; }
+      if (a && a.startsWith("-")) return { stderr: `bash: history: ${a}: invalid option\nhistory: usage: history [-c] [-d offset] [n] or history -anrw [filename] or history -ps arg [arg...]`, status: 2 };
+      const n = a ? parseInt(a, 10) : this.history.length;
+      const start = Math.max(0, this.history.length - n);
+      return { stdout: this.history.slice(start).map((h, i) => `${pad(start + i + 1, 5, " ")}  ${h}`).join("\n") + "\n" };
+    },
+
+    bash(args) {
+      if (args[0] === "--version" || args[0] === "-version") return { stdout: DEFAULT_CANNED["bash --version"] + "\n" };
+      return { stderr: "bash: a new shell isn't needed here. You're already in Bash.", status: 1 };
+    },
+
+    uname(args) {
+      return { stderr: `uname: this practice terminal knows these forms: uname, uname -s, -n, -r, -v, -m, -o, -a`, status: 1 };
+    },
+  };
+
+  function headTail(cmd, args, stdin) {
+    let n = 10;
+    const rest = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === "-n") n = parseInt(args[++i], 10);
+      else if (/^-n\d+$/.test(a)) n = parseInt(a.slice(2), 10);
+      else if (/^-\d+$/.test(a)) n = parseInt(a.slice(1), 10);
+      else rest.push(a);
+    }
+    const pick = (txt) => {
+      const lines = txt.replace(/\n$/, "").split("\n");
+      const sel = cmd === "head" ? lines.slice(0, n) : lines.slice(Math.max(0, lines.length - n));
+      return txt ? sel.join("\n") + "\n" : "";
+    };
+    if (!rest.length) return { stdout: pick(stdin) };
+    let out = "";
+    const err = [];
+    rest.forEach((p, i) => {
+      const node = this.vfs.get(this.abs(p));
+      if (!node || node.type !== "file") { err.push(`${cmd}: cannot open '${p}' for reading: No such file or directory`); return; }
+      if (rest.length > 1) out += (i ? "\n" : "") + `==> ${p} <==\n`;
+      out += pick(node.content);
+    });
+    return { stdout: out, stderr: err.join("\n"), status: err.length ? 1 : 0 };
+  }
+
+  LPIC.Shell = Shell;
+  LPIC.VFS = VFS;
+})();

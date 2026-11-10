@@ -1,0 +1,268 @@
+[
+ ["h1", "LPIC-1 Section 19 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objective 101.3: Change runlevels and boot targets, and shut down or reboot the system, using SysV init records, systemd targets, service checks, and user notifications."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like an IT engineer task, not a command drill. Read the ticket, collect the evidence the request asks for, save it under reports/, and prove it with the validation command."],
+ ["p", "Linux Mint uses systemd, not SysV init. The SysV labs use a practice copy of a legacy inittab and a practice rc.d tree that you build in the Lab Setup, plus the compatibility links Mint still keeps. The runlevel, target, and shutdown labs are inspect-and-explain: you read settings and rehearse with safe options. You will never run systemctl isolate, init, telinit, or a real shutdown on your VM. Any command marked Don't run on your VM is there so you can recognize it on the exam."],
+ ["p", "The only change these labs make to the system is a small practice service, lab-heartbeat, that runs sleep. Lab 9 removes it."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section19/{reports,samples/rc.d/init.d,samples/rc.d/rc3.d,samples/rc.d/rc5.d}"],
+ ["p", "cd ~/lpic1-section19"],
+ ["p", "Step 2: Create a practice copy of a legacy server's /etc/inittab:"],
+ ["p", "printf '# Practice copy of the inittab from legacy server db01\\nid:3:initdefault:\\nsi::sysinit:/etc/rc.d/rc.sysinit\\nl0:0:wait:/etc/rc.d/rc 0\\nl1:1:wait:/etc/rc.d/rc 1\\nl3:3:wait:/etc/rc.d/rc 3\\nl5:5:wait:/etc/rc.d/rc 5\\nl6:6:wait:/etc/rc.d/rc 6\\nca::ctrlaltdel:/sbin/shutdown -t3 -r now\\n1:2345:respawn:/sbin/mingetty tty1\\n2:2345:respawn:/sbin/mingetty tty2\\nx:5:respawn:/etc/X11/prefdm -nodaemon\\n' > samples/inittab"],
+ ["p", "Step 3: Create practice init scripts and the runlevel links that point to them:"],
+ ["p", "for s in network sshd httpd crond; do printf '#!/bin/sh\\necho \"%s $1\"\\n' $s > samples/rc.d/init.d/$s; chmod 755 samples/rc.d/init.d/$s; done"],
+ ["p", "cd samples/rc.d/rc3.d && ln -s ../init.d/network S10network && ln -s ../init.d/sshd S55sshd && ln -s ../init.d/crond S90crond && ln -s ../init.d/httpd K15httpd && cd ~/lpic1-section19"],
+ ["p", "cd samples/rc.d/rc5.d && ln -s ../init.d/network S10network && ln -s ../init.d/sshd S55sshd && ln -s ../init.d/httpd S85httpd && ln -s ../init.d/crond S90crond && cd ~/lpic1-section19"],
+ ["p", "Step 4: Create the unit file for the practice service used in Labs 8 and 9:"],
+ ["p", "printf '[Unit]\\nDescription=Lab heartbeat practice service\\n\\n[Service]\\nExecStart=/usr/bin/sleep infinity\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > samples/lab-heartbeat.service"],
+ ["p", "Validation check: Run ls -lR samples and confirm rc3.d and rc5.d contain links shown with -> ../init.d/..., and that samples/inittab and samples/lab-heartbeat.service exist. If a lab goes wrong, delete the samples folder and rerun Steps 2 to 4."],
+ ["h2", "Commands to Memorize"],
+ ["p", "runlevel, who -r, init, telinit, telinit q, /etc/inittab (id:N:initdefault:), /etc/init.d, /etc/rc.d/init.d, /etc/rcN.d, S and K links, service NAME status, systemctl get-default, systemctl set-default, systemctl isolate, systemctl start, stop, restart, reload, status, enable, disable, is-active, is-enabled, mask, cat, daemon-reload, list-units, list-unit-files, list-dependencies, is-system-running, --failed, --no-pager, rescue.target, emergency.target, multi-user.target, graphical.target, runlevelN.target, /etc/systemd/system, /run/systemd/system, /usr/lib/systemd/system, shutdown -h, -H, -P, -r, -k, -c, now, +m, hh:mm, halt, poweroff, reboot, wall, mesg, and acpid."],
+ ["h2", "Memory hook"],
+ ["p", "Think 0 off, 1 alone, 3 network, 5 desktop, 6 restart. SysV reads its default from /etc/inittab and runs the K links and then the S links for that runlevel. systemd reads default.target and starts the target's units in parallel. To switch: init or telinit for SysV, systemctl isolate for systemd. To stop the box: shutdown with a time and a message, and -c to call it off."],
+ ["h2", "Beginner Labs: SysV Init and Runlevels"],
+ ["lab", {
+  "title": "Lab 1: Read the default runlevel from a legacy inittab",
+  "scenario": "A ticket says legacy server db01 boots to a text console and the vendor asks which runlevel it starts in. You have a copy of its /etc/inittab.",
+  "task": "Find the initdefault record and pull out the runlevel number.",
+  "deliverable": "reports/db01-default-runlevel.txt with the record and the number.",
+  "steps": [
+   "grep initdefault samples/inittab > reports/db01-default-runlevel.txt",
+   "grep initdefault samples/inittab | cut -d: -f2 >> reports/db01-default-runlevel.txt",
+   "Read the other records too. The format is id:runlevels:action:process. Note which line runs the rc script for runlevel 3 and which line handles Ctrl+Alt+Del."
+  ],
+  "validation": "cat reports/db01-default-runlevel.txt and confirm it shows id:3:initdefault: followed by 3.",
+  "trap": "The default runlevel is the second field, and initdefault has no process field. Never set the default to 0 or 6: the server would halt or reboot as soon as it finished booting."
+ }],
+ ["lab", {
+  "title": "Lab 2: Report the current and previous runlevel",
+  "scenario": "The monitoring team asks what runlevel your Mint workstation is in, and whether it changed since boot.",
+  "task": "Collect the runlevel with three different commands.",
+  "deliverable": "reports/runlevel-now.txt.",
+  "steps": [
+   "runlevel > reports/runlevel-now.txt",
+   "who -r >> reports/runlevel-now.txt",
+   "systemctl get-default >> reports/runlevel-now.txt"
+  ],
+  "validation": "cat reports/runlevel-now.txt. The first line reads N 5 on a desktop, who -r shows run-level 5, and the default is graphical.target.",
+  "trap": "runlevel prints previous then current. N means there was no previous runlevel since boot. On systemd, runlevel and who -r are compatibility views that translate the active target into a number."
+ }],
+ ["lab", {
+  "title": "Lab 3: Map the start and kill links for runlevel 3",
+  "scenario": "Before db01 is retired, the change board wants a list of the services it starts and stops in runlevel 3, in order.",
+  "task": "List the links in the practice rc3.d directory, follow them to the real scripts, and explain the order.",
+  "deliverable": "reports/rc3-map.txt.",
+  "steps": [
+   "ls -l samples/rc.d/rc3.d > reports/rc3-map.txt",
+   "for f in samples/rc.d/rc3.d/*; do echo \"$f -> $(readlink -f $f)\"; done >> reports/rc3-map.txt",
+   "diff <(ls samples/rc.d/rc3.d) <(ls samples/rc.d/rc5.d) >> reports/rc3-map.txt"
+  ],
+  "validation": "cat reports/rc3-map.txt and confirm every link resolves to a script in samples/rc.d/init.d, and that the diff shows httpd is killed in runlevel 3 but started in runlevel 5.",
+  "trap": "K links run first, then S links, each in number order. The links all point to one script in init.d, so you fix a script once there, not in every rcN.d directory."
+ }],
+ ["lab", {
+  "title": "Lab 4: Inspect Mint's SysV compatibility layer",
+  "scenario": "A colleague coming from an old Red Hat shop asks where the init scripts live on Mint and whether the service command still works.",
+  "task": "Show where Debian-family systems keep init scripts and runlevel links, and check a service the old way.",
+  "deliverable": "reports/sysv-on-mint.txt.",
+  "steps": [
+   "ls /etc/init.d > reports/sysv-on-mint.txt",
+   "ls -l /etc/rc2.d >> reports/sysv-on-mint.txt 2>&1",
+   "ls -ld /etc/rc.d >> reports/sysv-on-mint.txt 2>&1",
+   "service cron status >> reports/sysv-on-mint.txt 2>&1",
+   "/etc/init.d/cron status >> reports/sysv-on-mint.txt 2>&1"
+  ],
+  "validation": "cat reports/sysv-on-mint.txt. It lists the scripts in /etc/init.d, shows that /etc/rc.d does not exist, and both status checks report cron as active (running).",
+  "trap": "Red Hat style systems keep scripts in /etc/rc.d/init.d and links in /etc/rc.d/rcN.d. Debian style systems use /etc/init.d and /etc/rcN.d directly. On systemd systems, service and the init.d scripts pass the request on to systemctl."
+ }],
+ ["h2", "Intermediate Labs: systemd Units and Targets"],
+ ["lab", {
+  "title": "Lab 5: Translate runlevels into systemd targets",
+  "scenario": "A runbook written for SysV says \"switch app02 to runlevel 3 before patching\". You need the systemd equivalent before the runbook is updated.",
+  "task": "Show how the runlevelN targets map to real targets, and record the default target.",
+  "deliverable": "reports/runlevel-targets.txt.",
+  "steps": [
+   "ls -l /usr/lib/systemd/system/runlevel*.target > reports/runlevel-targets.txt",
+   "systemctl get-default >> reports/runlevel-targets.txt",
+   "readlink -f /usr/lib/systemd/system/default.target >> reports/runlevel-targets.txt",
+   "Read only, Don't run on your VM: the runbook step becomes sudo systemctl isolate multi-user.target. The SysV forms are sudo init 3 or sudo telinit 3, and a permanent change is sudo systemctl set-default multi-user.target."
+  ],
+  "validation": "cat reports/runlevel-targets.txt and confirm runlevel3.target points to multi-user.target, runlevel5.target to graphical.target, runlevel1.target to rescue.target, and runlevel0 and runlevel6 to poweroff and reboot.",
+  "trap": "systemctl isolate stops every unit not needed by the new target, which is why it ends a desktop session. set-default only changes the next boot. systemd has no runlevel 2 or 4 of its own; those links also point to multi-user.target."
+ }],
+ ["lab", {
+  "title": "Lab 6: Inventory services and their boot states",
+  "scenario": "Security wants a list of services set to start at boot on a new Mint build, plus a count of each boot state.",
+  "task": "List the service unit files with their states and count enabled, disabled, and static units. List the active targets.",
+  "deliverable": "reports/unit-inventory.txt.",
+  "steps": [
+   "systemctl list-unit-files --type=service --no-pager > reports/unit-inventory.txt",
+   "for s in enabled disabled static; do echo \"$s: $(systemctl list-unit-files --type=service --no-pager | awk -v s=$s '$2==s' | wc -l)\"; done >> reports/unit-inventory.txt",
+   "systemctl list-units --type=target --no-pager >> reports/unit-inventory.txt"
+  ],
+  "validation": "grep -E '^(enabled|disabled|static):' reports/unit-inventory.txt shows three counts, and grep graphical.target reports/unit-inventory.txt shows it is active.",
+  "trap": "list-unit-files shows what is set to start at boot. list-units shows what is loaded in memory right now. static units cannot be enabled because they have no [Install] section; another unit pulls them in."
+ }],
+ ["lab", {
+  "title": "Lab 7: Find where a unit file lives and which copy wins",
+  "scenario": "Someone edited a cron unit file under /usr/lib and the change was lost after an update. You need to explain where local changes belong.",
+  "task": "Show the cron unit file, where it was loaded from, and what is in each unit directory.",
+  "deliverable": "reports/unit-paths.txt.",
+  "steps": [
+   "systemctl cat cron --no-pager > reports/unit-paths.txt",
+   "systemctl show -p FragmentPath cron >> reports/unit-paths.txt",
+   "ls /etc/systemd/system >> reports/unit-paths.txt",
+   "ls /usr/lib/systemd/system | head -20 >> reports/unit-paths.txt",
+   "ls -F /etc/systemd >> reports/unit-paths.txt"
+  ],
+  "validation": "grep FragmentPath reports/unit-paths.txt shows cron.service under /usr/lib/systemd/system (or /lib/systemd/system on Mint 21), and the file shows the [Unit], [Service], and [Install] sections.",
+  "trap": "Precedence is /etc/systemd/system first, then /run/systemd/system, then /usr/lib/systemd/system. Package files in /usr/lib are replaced on updates; your changes go in /etc. Some course handouts get this backwards."
+ }],
+ ["lab", {
+  "title": "Lab 8: Deploy, start, and enable a practice service",
+  "scenario": "The app team hands you a unit file for a small heartbeat service and asks you to run it now and at every boot.",
+  "task": "Install the unit file, make systemd read it, start it, and enable it.",
+  "deliverable": "reports/heartbeat.txt showing it active and enabled.",
+  "steps": [
+   "sudo cp samples/lab-heartbeat.service /etc/systemd/system/",
+   "sudo systemctl daemon-reload",
+   "sudo systemctl start lab-heartbeat",
+   "systemctl status lab-heartbeat --no-pager > reports/heartbeat.txt",
+   "sudo systemctl enable lab-heartbeat",
+   "ls -l /etc/systemd/system/multi-user.target.wants/lab-heartbeat.service >> reports/heartbeat.txt",
+   "systemctl is-active lab-heartbeat >> reports/heartbeat.txt; systemctl is-enabled lab-heartbeat >> reports/heartbeat.txt"
+  ],
+  "validation": "tail -2 reports/heartbeat.txt shows active and enabled, and the ls line shows a link into the multi-user.target.wants directory.",
+  "trap": "start runs it now; enable only creates the link that starts it at boot. You need both, or enable --now. Without daemon-reload after adding or editing a unit file, systemd keeps using the old version."
+ }],
+ ["lab", {
+  "title": "Lab 9: Stop, disable, and remove the practice service",
+  "scenario": "The heartbeat trial is over. Leave the build exactly as it was.",
+  "task": "Check the service the SysV way, then stop it, disable it, and remove its unit file.",
+  "deliverable": "reports/heartbeat-removed.txt.",
+  "steps": [
+   "service lab-heartbeat status > reports/heartbeat-removed.txt 2>&1",
+   "sudo systemctl stop lab-heartbeat",
+   "sudo systemctl disable lab-heartbeat",
+   "sudo rm /etc/systemd/system/lab-heartbeat.service",
+   "sudo systemctl daemon-reload",
+   "systemctl status lab-heartbeat --no-pager >> reports/heartbeat-removed.txt 2>&1"
+  ],
+  "validation": "tail -3 reports/heartbeat-removed.txt reports that Unit lab-heartbeat.service could not be found.",
+  "trap": "disable does not stop a running service, and stop does not prevent it starting at the next boot. mask is stronger than disable: it links the unit to /dev/null so nothing can start it, even by hand, until you unmask it."
+ }],
+ ["h2", "Advanced Labs: Targets, Notices, and Shutdown"],
+ ["lab", {
+  "title": "Lab 10: Check system health and plan a rescue",
+  "scenario": "A user reports that web01 \"booted but something is off\". You practice the triage on your VM and write down how you would reach single-user mode if needed.",
+  "task": "Check the overall state, list failed units, and show what the graphical target pulls in.",
+  "deliverable": "reports/health.txt with a rescue plan at the end.",
+  "steps": [
+   "systemctl is-system-running > reports/health.txt",
+   "systemctl --failed --no-pager >> reports/health.txt",
+   "systemctl list-dependencies graphical.target --no-pager | head -25 >> reports/health.txt",
+   "Add the plan with nano reports/health.txt. Read only, Don't run on your VM: sudo systemctl isolate rescue.target (same as init 1 or telinit 1), or at boot add systemd.unit=rescue.target, or 1, or single to the kernel line. emergency.target is the more minimal one."
+  ],
+  "validation": "head -1 reports/health.txt shows running or degraded, and grep -c rescue reports/health.txt is at least 1.",
+  "trap": "degraded means the target is reached but at least one unit failed; it does not mean the system is down. list-dependencies shows that graphical.target includes multi-user.target, so a desktop also runs every server service."
+ }],
+ ["lab", {
+  "title": "Lab 11: Broadcast a notice with wall and control mesg",
+  "scenario": "Before a maintenance window you must warn everyone logged in to app02. You test the broadcast on your own sessions first.",
+  "task": "Check that your terminal accepts messages, send a wall message two ways, then turn messages off and back on.",
+  "deliverable": "reports/wall-test.txt.",
+  "steps": [
+   "mesg > reports/wall-test.txt",
+   "mesg y; wall 'Practice notice: app02 maintenance drill at 22:00, no action needed'",
+   "echo 'Second notice: drill complete' | wall",
+   "mesg n; mesg >> reports/wall-test.txt; mesg y; mesg >> reports/wall-test.txt"
+  ],
+  "validation": "cat reports/wall-test.txt shows is y, is n, is y, and both broadcasts appeared in your terminal with a Broadcast message from banner.",
+  "trap": "wall reads the message from its arguments, a file, or standard input; with no message it waits for text until Ctrl+D. Users with mesg n do not see broadcasts from ordinary users, but root's messages still get through."
+ }],
+ ["lab", {
+  "title": "Lab 12: Rehearse a scheduled reboot without rebooting",
+  "scenario": "Tonight's change needs a 15-minute warning before db01 reboots. You rehearse the announcement on your VM and must not take it down.",
+  "task": "Send the warning with shutdown -k, confirm the schedule, then cancel it.",
+  "deliverable": "reports/shutdown-drill.txt.",
+  "steps": [
+   "sudo shutdown -k +15 'Practice notice: db01 reboot drill, no action needed'",
+   "cat /run/systemd/shutdown/scheduled > reports/shutdown-drill.txt 2>&1",
+   "sudo shutdown -c",
+   "ls /run/systemd/shutdown/ >> reports/shutdown-drill.txt 2>&1; systemctl is-system-running >> reports/shutdown-drill.txt",
+   "Read only, Don't run on your VM: the real change would be sudo shutdown -r +15 'db01 rebooting for patching, save your work'."
+  ],
+  "validation": "cat reports/shutdown-drill.txt. While the drill was scheduled the file named a dry mode (or shutdown -k reported the warning was sent), after the cancel the scheduled file is gone, and the last line still shows running or degraded.",
+  "trap": "-k only sends the warning and never stops the system. Always pair a practice shutdown with -c. Without a time, systemd's shutdown waits one minute; now means immediately. Five minutes before the time, logins by ordinary users are blocked with /run/nologin."
+ }],
+ ["lab", {
+  "title": "Lab 13: Write a shutdown command reference",
+  "scenario": "A new on-call engineer asks how halt, poweroff, reboot, and shutdown relate, and why acpid comes up on the exam.",
+  "task": "Show where each command really points, check for acpid, and write a short reference.",
+  "deliverable": "reports/shutdown-reference.txt.",
+  "steps": [
+   "for c in shutdown halt poweroff reboot telinit init; do ls -l $(command -v $c); done > reports/shutdown-reference.txt",
+   "systemctl list-unit-files --no-pager | grep -i acpid >> reports/shutdown-reference.txt || echo 'acpid not installed on this build' >> reports/shutdown-reference.txt",
+   "nano reports/shutdown-reference.txt and add one line each, read only, Don't run on your VM: shutdown -h now (halt or power off), shutdown -H (halt only), shutdown -P (power off), shutdown -r 22:30 (reboot at a 24-hour clock time), shutdown +10 'msg', shutdown -c, halt -p, systemctl poweroff, systemctl reboot, systemctl halt, and systemctl isolate poweroff.target."
+  ],
+  "validation": "grep -c systemctl reports/shutdown-reference.txt is at least 4, and the ls lines show shutdown, halt, poweroff, and reboot linking to systemctl.",
+  "trap": "On systemd systems these are all links to systemctl, so halt -p behaves like poweroff and reboot is the same as shutdown -r now. shutdown first sends SIGTERM so processes can exit cleanly, then SIGKILL to anything left. acpid handles ACPI events such as a power button press, and is often absent on VMs."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+  "Reading the runlevel output backwards. The first value is the previous runlevel (N if none) and the second is the current one.",
+  "Forgetting the inittab record format. The default is id:3:initdefault:, with the runlevel in the second field.",
+  "Mixing up runlevel numbers. 0 halt, 1 single user, 2 multi-user without networking on Red Hat style systems, 3 multi-user text with networking, 5 graphical, 6 reboot. Debian historically used 2 for full multi-user.",
+  "Confusing K and S links. K stops, S starts, the number sets the order, and the links point to scripts in init.d.",
+  "Mixing up script locations. Red Hat uses /etc/rc.d/init.d and /etc/rc.d/rcN.d; Debian uses /etc/init.d and /etc/rcN.d.",
+  "Forgetting telinit q. It tells SysV init to reread /etc/inittab without changing runlevel.",
+  "Thinking systemctl set-default changes the running state. It changes the next boot only; isolate changes the running state.",
+  "Using start instead of isolate to switch targets. start adds units but stops nothing.",
+  "Confusing enable with start, and disable with stop. Boot-time behavior and current state are separate.",
+  "Getting unit file precedence backwards. /etc/systemd/system beats /run/systemd/system, which beats /usr/lib/systemd/system.",
+  "Forgetting systemctl daemon-reload after adding or editing a unit file.",
+  "Treating shutdown -k as a real shutdown. It only sends the warning; shutdown -c cancels a pending shutdown.",
+  "Using 12-hour times. shutdown takes now, +minutes, or hh:mm in 24-hour time, and with no time systemd waits one minute.",
+  "Forgetting that wall only reaches terminals with mesg y, and that halt, poweroff, and reboot are links to systemctl on systemd systems."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes. Use only your Linux Mint VM and the files in ~/lpic1-section19. Rerun Steps 2 to 4 of the Lab Setup first if you changed the samples. Never run isolate, init, telinit, or a shutdown without -k."],
+ ["numbered", [
+  "Save the default runlevel from samples/inittab, and only the number, to reports/challenge-default.txt.",
+  "Save the current runlevel, the previous runlevel, and the default systemd target of your VM to reports/challenge-state.txt.",
+  "List which services runlevel 3 on the legacy server stops, and which script each one points to.",
+  "Prove which target runlevel5.target really is.",
+  "Show where the cron unit file is loaded from and explain where a local override would go.",
+  "Install the practice heartbeat service, start it, enable it, prove both states, then remove it completely.",
+  "Send a wall message to your own sessions and prove that mesg n blocks messages from ordinary users.",
+  "Schedule a 20-minute reboot warning with shutdown -k, prove it was scheduled, and cancel it."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each file, write a short sentence explaining what it proves and confirm that your VM never left graphical.target."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+  "Legacy support request: “db01 still uses SysV init. Which runlevel does it boot into, and which file sets it?”",
+  "Change board request: “Our runbook says telinit 3. What is the systemd command that does the same thing, and what will it stop?”",
+  "Security request: “Give me a list of every service set to start at boot on this build.”",
+  "App team request: “We dropped a new unit file into /etc/systemd/system but systemctl still shows the old settings. Why?”",
+  "Help desk request: “Warn everyone on app02 that it reboots in 15 minutes, and tell me how you would cancel it.”",
+  "Teammate request: “I edited a file under /usr/lib/systemd/system and my change disappeared after patching. Where should it go?”",
+  "On-call request: “The power button on web01 does nothing. Which daemon handles that, and how do I check whether it is installed?”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+  "I can name SysV runlevels 0 to 6 and what each one does.",
+  "I can find the default runlevel in /etc/inittab and explain the id:N:initdefault: record.",
+  "I can read the output of runlevel and who -r.",
+  "I can explain K and S links in /etc/rcN.d and where the real scripts live on Red Hat and Debian systems.",
+  "I can describe init N, telinit N, and telinit q without running them on a production system.",
+  "I can map runlevels to systemd targets and show the default with systemctl get-default.",
+  "I can explain the difference between set-default and isolate, and between start and isolate.",
+  "I can start, stop, restart, enable, disable, and mask a service, and check it with is-active and is-enabled.",
+  "I can find a unit file with systemctl cat and explain the /etc, /run, and /usr/lib precedence.",
+  "I can check system health with is-system-running and --failed, and name rescue.target and emergency.target.",
+  "I can send wall messages and control them with mesg.",
+  "I can schedule, warn about, and cancel a shutdown with shutdown, and explain halt, poweroff, reboot, and acpid."
+ ], 4]
+]

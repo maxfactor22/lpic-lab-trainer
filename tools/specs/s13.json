@@ -1,0 +1,252 @@
+[
+ ["h1", "LPIC-1 Section 13 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objectives 101.1, 102.1 and 104.1: Understand mass storage terms (disks, partitions, filesystems, swap, logical volumes and Btrfs) and inspect them with lsblk, /proc, /dev and free."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like a ticket from a teammate who needs a clear answer about storage. Read the scenario, run the inspection commands, save the evidence under reports/, and add a sentence or two in your own words that explains what the output means."],
+ ["p", "This section is about reading and explaining storage, not changing it. Nothing here partitions, formats or mounts anything. The one lab that adds a disk attaches a blank image file as a loop device and detaches it again. Creating partitions, filesystems and swap comes in Section 15, also on image files."],
+ ["p", "Your Linux Mint VM may name its main disk sda (VirtualBox, VMware), vda (KVM) or nvme0n1 (NVMe). Lab Setup stores the real name in the DISK variable so the commands work on any of them. Mint also normally uses a swap file instead of a swap partition and usually has no LVM, so several labs ask you to explain what you would see on a server that does."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section13/{reports,images,notes}"],
+ ["p", "cd ~/lpic1-section13"],
+ ["p", "Step 2: Record the name of your VM's main disk. Rerun this line whenever you open a new terminal:"],
+ ["p", "DISK=$(lsblk -dno NAME,TYPE | awk '$2==\"disk\"{print $1; exit}'); echo $DISK"],
+ ["p", "Step 3: Create the sample ticket and a blank 256 MB disk image. The image is sparse, so it uses almost no real space:"],
+ ["p", "printf 'Ticket: STOR-1013\\nRequester: bob (app team)\\nHost: app02\\nQuestion 1: How many disks and partitions does this host have?\\nQuestion 2: Which filesystem types are in use?\\nQuestion 3: How much swap is there, and is it a partition or a file?\\nQuestion 4: Is LVM in use?\\n' > notes/ticket-stor-1013.txt"],
+ ["p", "truncate -s 256M images/newdisk.img"],
+ ["p", "Step 4: Install the lsdev tool for Lab 10. It is part of the procinfo package. If lsdev is still missing afterwards, Lab 10 works from the /proc files alone:"],
+ ["p", "sudo apt install procinfo"],
+ ["p", "Validation check: Run ls -lsR and confirm notes/ticket-stor-1013.txt exists and images/newdisk.img shows a size of 268435456 bytes with 0 blocks used. Run echo $DISK and confirm it prints a name such as sda, vda or nvme0n1."],
+ ["h2", "Commands to Memorize"],
+ ["p", "lsblk, lsblk -f, lsblk -p, lsblk -s, lsblk -d, lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MAJ:MIN, cat /proc/partitions, cat /proc/filesystems, cat /proc/swaps, free -h, swapon --show, /dev/sda, /dev/sda1, /dev/sdb, /dev/hda, /dev/sr0, /dev/fd0, /dev/vda, /dev/nvme0n1p1, /dev/disk/by-id, /dev/disk/by-uuid, /dev/disk/by-path, /dev/disk/by-label, readlink -f, /dev/mapper, /dev/dm-0, pvcreate, vgcreate, lvcreate, pvs, vgs, lvs, lsdev, /proc/interrupts, /proc/ioports, /proc/dma, losetup -f --show, losetup -d, findmnt and /sys/firmware/efi."],
+ ["h2", "Memory hook"],
+ ["p", "Think of storage as building a town. The disk is the raw land. Partitions are the lots marked out on it. A filesystem is the building plan that lets you store and find things on a lot. The mount point is the street address where people reach the building. LVM is a land agency that pools several lots into one big flexible lot, and swap is an overflow car park for RAM. Each layer has its own command: lsblk shows land and lots, lsblk -f shows building plans, and findmnt shows addresses."],
+ ["h2", "Beginner Labs: Disks, Partitions and Filesystems"],
+ ["lab", {
+  "title": "Lab 1: Count the disks and partitions on a host",
+  "scenario": "Ticket STOR-1013 from bob asks how many disks and partitions app02 has. Your VM stands in for app02.",
+  "task": "List the block devices, tell whole disks apart from partitions, and show the device files for the main disk.",
+  "deliverable": "reports/storage-overview.txt with the lsblk output, the device files, and a one-line answer.",
+  "steps": [
+   "lsblk > reports/storage-overview.txt",
+   "ls -l /dev/${DISK}* >> reports/storage-overview.txt",
+   "echo \"Answer: $(lsblk -dno TYPE | grep -c disk) disk(s) and $(lsblk -no TYPE | grep -c part) partition(s)\" >> reports/storage-overview.txt"
+  ],
+  "validation": "cat reports/storage-overview.txt. The TYPE column shows disk for the whole disk and part for each partition, and the last line gives both counts.",
+  "trap": "A file such as /dev/sda is the whole disk and /dev/sda1 is its first partition. A partition can take up the entire disk, so one partition does not mean the disk is small. The loop and rom rows in lsblk are not hard disks."
+ }],
+ ["lab", {
+  "title": "Lab 2: Identify devices by their names",
+  "scenario": "A field engineer asks whether app02 has an optical drive, any old IDE (PATA) disks, or a floppy drive before shipping it to a branch office.",
+  "task": "Check for each family of storage device file and record which ones exist.",
+  "deliverable": "reports/device-names.txt listing what was found and what was not.",
+  "steps": [
+   "ls -l /dev/sd? /dev/vd? /dev/nvme?n? > reports/device-names.txt 2>&1",
+   "ls -l /dev/hd? /dev/sr? /dev/fd? >> reports/device-names.txt 2>&1",
+   "nano reports/device-names.txt and add one line under the output for each family: SATA, SCSI and USB disks (sd), virtio disks (vd), NVMe (nvme), old PATA (hd), optical (sr) and floppy (fd)."
+  ],
+  "validation": "cat reports/device-names.txt. Expect your main disk to be listed and No such file or directory messages for the families your VM does not have.",
+  "trap": "sdb means the second disk, not a partition. Partitions add a number: sdb1. NVMe adds a p before the partition number: nvme0n1p1. hda names are from old PATA systems; modern kernels name PATA disks sd as well."
+ }],
+ ["lab", {
+  "title": "Lab 3: Compare the kernel's partition list with lsblk",
+  "scenario": "A monitoring script reads /proc/partitions instead of running lsblk. The developer wants to know whether the two agree and what the numbers mean.",
+  "task": "Save both views side by side and convert the main disk's block count to GiB.",
+  "deliverable": "reports/proc-partitions.txt",
+  "steps": [
+   "cat /proc/partitions > reports/proc-partitions.txt",
+   "lsblk -o NAME,MAJ:MIN,SIZE,TYPE >> reports/proc-partitions.txt",
+   "awk -v d=$DISK '$4==d {printf \"%s is %.1f GiB\\n\", $4, $3/1024/1024}' /proc/partitions >> reports/proc-partitions.txt"
+  ],
+  "validation": "tail -1 reports/proc-partitions.txt and confirm the size is close to what lsblk shows for the disk.",
+  "trap": "The #blocks column in /proc/partitions counts 1 KiB blocks, not sectors and not bytes. The file shows what the kernel currently knows, which is why newly created partitions sometimes do not appear until the kernel rereads the table."
+ }],
+ ["lab", {
+  "title": "Lab 4: Check which filesystems the kernel supports",
+  "scenario": "The database team plans to bring a disk formatted with XFS from another server. They ask whether this host can read it and which filesystems are already in use.",
+  "task": "List the filesystems the running kernel supports, separate real on-disk ones from virtual ones, and show what each partition is formatted with.",
+  "deliverable": "reports/fs-supported.txt, reports/fs-on-devices.txt and reports/fs-in-use.txt.",
+  "steps": [
+   "cat /proc/filesystems > reports/fs-supported.txt",
+   "grep -v nodev /proc/filesystems > reports/fs-on-devices.txt",
+   "lsblk -f > reports/fs-in-use.txt",
+   "ls /lib/modules/$(uname -r)/kernel/fs >> reports/fs-on-devices.txt"
+  ],
+  "validation": "grep -w ext4 reports/fs-on-devices.txt and grep -c ext4 reports/fs-in-use.txt. Then check whether xfs appears in the module directory list at the end of fs-on-devices.txt.",
+  "trap": "nodev in the first column means the filesystem is virtual and has no block device behind it, such as proc, sysfs and tmpfs. /proc/filesystems only lists filesystems that are built in or already loaded; a filesystem whose module is not loaded yet, such as xfs, may be missing from the list even though the kernel can load it."
+ }],
+ ["h2", "Intermediate Labs: Swap, Views and Persistent Names"],
+ ["lab", {
+  "title": "Lab 5: Report the swap space",
+  "scenario": "Question 3 of STOR-1013 asks how much swap app02 has and whether it is a partition or a file.",
+  "task": "Show the swap total, list each swap area, and check whether lsblk shows a swap partition.",
+  "deliverable": "reports/swap.txt with the evidence and a one-line answer.",
+  "steps": [
+   "free -h > reports/swap.txt",
+   "swapon --show >> reports/swap.txt",
+   "cat /proc/swaps >> reports/swap.txt",
+   "lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT >> reports/swap.txt",
+   "Add your answer at the end with nano: the size, and whether the TYPE column in swapon --show says file or partition."
+  ],
+  "validation": "grep -i swap reports/swap.txt. On a default Mint install, swapon --show lists /swapfile with TYPE file and lsblk shows no partition with FSTYPE swap.",
+  "trap": "Swap can be a partition, a logical volume or a file. It extends RAM by moving memory pages of idle processes to disk, so it is much slower than RAM. In lsblk -f a swap partition shows FSTYPE swap and the mount point [SWAP]; a swap file never shows in lsblk."
+ }],
+ ["lab", {
+  "title": "Lab 6: Shape lsblk output for a report",
+  "scenario": "Your team lead wants a compact storage table for the change record, with full device paths and the dependency chain from each filesystem down to its disk.",
+  "task": "Produce four lsblk views: chosen columns, full paths, disks only, and the inverse (bottom-up) tree.",
+  "deliverable": "reports/lsblk-views.txt",
+  "steps": [
+   "lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT > reports/lsblk-views.txt",
+   "lsblk -p >> reports/lsblk-views.txt",
+   "lsblk -d >> reports/lsblk-views.txt",
+   "lsblk -s >> reports/lsblk-views.txt",
+   "lsblk --help | grep -A60 'Available output columns' | head -25 >> reports/lsblk-views.txt"
+  ],
+  "validation": "grep -c '/dev/' reports/lsblk-views.txt returns a number greater than 0, which proves the -p view is included.",
+  "trap": "The -o list is comma separated with no spaces. lsblk -o NAME, SIZE fails because SIZE becomes a separate argument that lsblk treats as a device name. -s turns the tree upside down, so a filesystem is listed first with its disk underneath."
+ }],
+ ["lab", {
+  "title": "Lab 7: Find the persistent names of a disk",
+  "scenario": "A server's disks swapped names after a controller was added: sdb became sdc. The team wants to know which names stay stable.",
+  "task": "List the persistent name directories under /dev/disk and resolve each link to the real device file.",
+  "deliverable": "reports/persistent-names.txt",
+  "steps": [
+   "ls -l /dev/disk/by-id /dev/disk/by-uuid /dev/disk/by-path > reports/persistent-names.txt 2>&1",
+   "ls -l /dev/disk/by-label >> reports/persistent-names.txt 2>&1",
+   "for l in /dev/disk/by-uuid/*; do echo \"$l -> $(readlink -f $l)\"; done >> reports/persistent-names.txt"
+  ],
+  "validation": "grep -c -- '->' reports/persistent-names.txt returns several matches, and the last lines show each UUID resolving to a /dev/ name.",
+  "trap": "by-id uses the model and serial number, by-path uses the bus position, by-uuid uses the filesystem's UUID, and by-label exists only if a filesystem has a label. A UUID belongs to the filesystem, so it changes when the partition is reformatted. It is fine for by-label to be missing."
+ }],
+ ["lab", {
+  "title": "Lab 8: Check for LVM and the device mapper",
+  "scenario": "Question 4 of STOR-1013 asks whether app02 uses LVM. On a server that does, the answer explains why growing a volume needs no downtime.",
+  "task": "Look for device mapper devices, resolve them, and write a short explanation of the LVM layers.",
+  "deliverable": "reports/lvm-check.txt",
+  "steps": [
+   "ls -l /dev/mapper > reports/lvm-check.txt",
+   "lsblk -p | grep -E 'mapper|lvm' >> reports/lvm-check.txt || echo 'No LVM volumes on this host' >> reports/lvm-check.txt",
+   "ls -l /dev/dm-* >> reports/lvm-check.txt 2>&1",
+   "for l in /dev/mapper/*; do echo \"$l -> $(readlink -f $l)\"; done >> reports/lvm-check.txt",
+   "Use nano to add four lines: physical volume (a partition marked for LVM with pvcreate), volume group (a pool of physical volumes made with vgcreate), logical volume (space carved from the group with lvcreate, then formatted and mounted like a partition), and how pvs, vgs and lvs report each layer."
+  ],
+  "validation": "grep control reports/lvm-check.txt. /dev/mapper/control always exists. If your VM uses LVM, you also see names such as vgname-root that resolve to /dev/dm-0.",
+  "trap": "A partition cannot join a volume group until pvcreate makes it a physical volume. The device mapper names /dev/mapper/vgname-lvname are symbolic links to /dev/dm-N, and the same volume is also reachable as /dev/vgname/lvname. In lsblk the TYPE column shows lvm for a logical volume."
+ }],
+ ["lab", {
+  "title": "Lab 9: Brief the database team on Btrfs",
+  "scenario": "The database team has heard that Btrfs handles large files, snapshots and compression, and asks whether this host could use it.",
+  "task": "Check the kernel's Btrfs support and write a short briefing note in your own words.",
+  "deliverable": "reports/btrfs-note.txt",
+  "steps": [
+   "grep -w btrfs /proc/filesystems > reports/btrfs-note.txt || echo 'btrfs module not loaded yet' > reports/btrfs-note.txt",
+   "ls -d /lib/modules/$(uname -r)/kernel/fs/btrfs >> reports/btrfs-note.txt",
+   "which mkfs.btrfs >> reports/btrfs-note.txt || echo 'btrfs-progs not installed' >> reports/btrfs-note.txt",
+   "nano reports/btrfs-note.txt and add lines on: its B-tree and copy-on-write design, built-in RAID 0, 1 and 10 across several devices, subvolumes and snapshots (mounted with -o subvol=name), and transparent per-file compression with zlib, lzo or zstd."
+  ],
+  "validation": "grep -c -i -E 'raid|subvol|compress|snapshot' reports/btrfs-note.txt returns at least 4.",
+  "trap": "Btrfs is a filesystem, not a volume manager, even though it can span several devices and has subvolumes. Compression is transparent: applications read and write normal data. The LPIC objective also lists ReiserFS as an older journaling filesystem to know by name; it has been removed from recent kernels."
+ }],
+ ["h2", "Advanced Labs: System Resources, New Disks and Layout"],
+ ["lab", {
+  "title": "Lab 10: List interrupts, I/O ports and DMA channels",
+  "scenario": "A vendor's support engineer asks for the IRQ and I/O port assignments on app02 while troubleshooting an old add-in card.",
+  "task": "Run lsdev if available, and capture the three /proc files it reads from.",
+  "deliverable": "reports/resources.txt",
+  "steps": [
+   "which lsdev && lsdev > reports/resources.txt",
+   "cat /proc/interrupts >> reports/resources.txt",
+   "sudo cat /proc/ioports >> reports/resources.txt",
+   "cat /proc/dma >> reports/resources.txt"
+  ],
+  "validation": "grep -i timer reports/resources.txt returns at least one line (the timer appears in both the interrupt and the I/O port lists).",
+  "trap": "Without sudo, /proc/ioports shows every address as 0000-0000. /proc/dma is often nearly empty on modern hardware because few devices use ISA DMA channels. lsdev is not installed by default."
+ }],
+ ["lab", {
+  "title": "Lab 11: Watch a new blank disk appear",
+  "scenario": "Before Section 15's partitioning work, a junior engineer wants to see what a brand-new, unpartitioned disk looks like to Linux.",
+  "task": "Attach the blank image as a loop device, inspect it with lsblk and /proc/partitions, then detach it.",
+  "deliverable": "reports/new-disk.txt",
+  "steps": [
+   "NEW=$(sudo losetup -f --show images/newdisk.img); echo $NEW > reports/new-disk.txt",
+   "lsblk $NEW >> reports/new-disk.txt",
+   "grep -w $(basename $NEW) /proc/partitions >> reports/new-disk.txt",
+   "lsblk -f $NEW >> reports/new-disk.txt",
+   "sudo losetup -d $NEW",
+   "losetup -j images/newdisk.img"
+  ],
+  "validation": "cat reports/new-disk.txt shows a loop device of 256M with no partitions and an empty FSTYPE column. The final losetup -j command prints nothing, which proves the image is detached.",
+  "trap": "A new disk has no partition table and no filesystem, so it cannot hold files yet. The loop device behaves like a disk, but always detach it with losetup -d when you finish so it does not stay attached."
+ }],
+ ["lab", {
+  "title": "Lab 12: Map the disk layout to the directory tree",
+  "scenario": "For a design review, the architect asks how app02's disk is laid out: BIOS or UEFI boot, which partitions are mounted where, and what you would change for a database server.",
+  "task": "Record the boot firmware, the mounted filesystems and the layout, then write a short recommendation.",
+  "deliverable": "reports/layout.txt",
+  "steps": [
+   "[ -d /sys/firmware/efi ] && echo UEFI > reports/layout.txt || echo BIOS > reports/layout.txt",
+   "findmnt -t ext4,vfat,xfs,btrfs >> reports/layout.txt",
+   "findmnt /boot/efi >> reports/layout.txt || echo 'No EFI system partition mounted' >> reports/layout.txt",
+   "lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT >> reports/layout.txt",
+   "nano reports/layout.txt and add a recommendation: separate partitions or volumes for /var and /home, where swap should go, and why /boot/efi must be a FAT (vfat) partition on UEFI systems."
+  ],
+  "validation": "head -1 reports/layout.txt prints UEFI or BIOS, and grep -c ext4 reports/layout.txt returns at least 1.",
+  "trap": "A UEFI system needs an EFI system partition (ESP) formatted as FAT and usually mounted at /boot/efi. A BIOS system booting from a GPT disk needs a small BIOS boot partition instead. Putting /var on its own partition stops runaway logs from filling the root filesystem."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+  "Mixing up disks and partitions. /dev/sdb is the second whole disk; /dev/sda2 is the second partition on the first disk.",
+  "Forgetting the p in NVMe partition names. The first partition on nvme0n1 is nvme0n1p1.",
+  "Assuming hd names are current. /dev/hda belongs to old PATA systems; /dev/sr0 is an optical drive and /dev/fd0 a floppy.",
+  "Calling a partition a filesystem before it is formatted. A partition is just space until mkfs puts a filesystem on it.",
+  "Reading /proc/partitions sizes as bytes or sectors. The #blocks column is in 1 KiB blocks.",
+  "Thinking nodev filesystems live on a disk. nodev entries in /proc/filesystems, such as proc, sysfs and tmpfs, have no block device.",
+  "Expecting /proc/filesystems to list every filesystem the kernel could use. Modules that are not loaded yet are missing.",
+  "Putting spaces in an lsblk -o column list. Use commas only: lsblk -o NAME,SIZE,FSTYPE.",
+  "Forgetting which lsblk option does what: -f filesystems, -p full paths, -s inverse dependencies, -d disks only.",
+  "Treating swap as extra RAM. It is disk space that holds pages from idle processes, and it can be a partition, a logical volume or a file.",
+  "Getting the LVM order wrong. Partitions become physical volumes, physical volumes join a volume group, and logical volumes are carved from the group.",
+  "Not recognizing device mapper names. /dev/mapper/vg-lv is a link to /dev/dm-N, and lsblk shows the type as lvm.",
+  "Assuming a UUID survives a reformat. The UUID belongs to the filesystem, so mkfs creates a new one.",
+  "Calling Btrfs a volume manager. It is a copy-on-write filesystem with its own RAID, subvolumes, snapshots and transparent compression."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes, using only your Linux Mint VM and the files in ~/lpic1-section13. Run Step 2 of the Lab Setup first so DISK is set, and save each answer under reports/ with a name that starts with challenge-."],
+ ["numbered", [
+  "Answer all four questions in notes/ticket-stor-1013.txt in one file, with the command output that proves each answer.",
+  "Show the size of your main disk using /proc/partitions only, converted to GiB.",
+  "List the filesystems your kernel supports that need a block device.",
+  "Show every block device with its full path, its filesystem type and its mount point in one lsblk command.",
+  "Prove whether your swap is a file or a partition, and give its size.",
+  "Resolve every link in /dev/disk/by-id to its real device file.",
+  "Attach images/newdisk.img as a loop device, show that it has no filesystem, and detach it.",
+  "State whether your VM boots with BIOS or UEFI, and name the partition that holds the EFI files if there is one."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each challenge file, write one sentence explaining what it proves, as if you were closing the ticket for bob."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+  "App team request: “How many disks and partitions does app02 have, and which one holds the root filesystem?”",
+  "Database team request: “Can this kernel read XFS today, or does it need a module loaded first?”",
+  "Capacity planner request: “How much swap does web01 have, and is it a file or a partition?”",
+  "Field engineer request: “Is there an optical drive in db01? Give me the device file name.”",
+  "Storage team request: “The disk names changed after a reboot. Show me a name for this disk that will not change.”",
+  "Architect request: “Is this server using LVM? If it is, show me which logical volumes sit on which partitions.”",
+  "Vendor support request: “Send me the interrupt and I/O port list from this machine.”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+  "I can explain the difference between a disk, a partition, a filesystem and a mount point.",
+  "I can name disks and partitions for SATA, SCSI and USB (sd), virtio (vd), NVMe, PATA (hd), optical (sr) and floppy (fd) devices.",
+  "I can list block devices with lsblk and read its NAME, SIZE, TYPE and MOUNTPOINT columns.",
+  "I can use lsblk -f, -p, -s, -d and -o to show the view a request needs.",
+  "I can read /proc/partitions and convert its block counts to GiB.",
+  "I can read /proc/filesystems and explain what nodev means.",
+  "I can report swap with free -h, swapon --show and /proc/swaps, and tell a swap file from a swap partition.",
+  "I can find persistent disk names in /dev/disk/by-id, by-uuid, by-path and by-label and resolve them with readlink -f.",
+  "I can explain physical volumes, volume groups and logical volumes, and recognize /dev/mapper and /dev/dm-N names.",
+  "I can describe the main features of Btrfs: copy-on-write, built-in RAID, subvolumes, snapshots and compression.",
+  "I can show interrupts, I/O ports and DMA channels with lsdev or the /proc files.",
+  "I can tell whether a system boots with BIOS or UEFI and explain where the EFI system partition fits in the layout."
+ ], 4]
+]

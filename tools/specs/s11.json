@@ -1,0 +1,279 @@
+[
+ ["h1", "LPIC-1 Section 11 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objectives 103.5 and 103.6: Create, monitor, and kill processes, and modify process execution priorities, using realistic triage, job control, and maintenance-window tasks."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like an incident or an operations request, not a command drill. Read the scenario, find the right process before you touch it, use the gentlest signal that works, and prove the result with ps, pgrep, jobs, or top."],
+ ["p", "Use a Linux Mint VM and stay inside ~/lpic1-section11. Every process you start, stop, or kill in these labs is one of your own practice scripts or a sleep command. The CPU test script stops itself after five minutes. Never run kill, killall, or pkill with sudo in these labs; as a normal user you cannot harm system processes, and that is the safety net."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Check for the terminal multiplexers and killall. Linux Mint does not always install tmux and screen:"],
+ ["p", "command -v tmux screen killall"],
+ ["p", "If any of the three is missing from the output, install them with: sudo apt install tmux screen psmisc"],
+ ["p", "Step 2: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section11/{bin,reports}"],
+ ["p", "cd ~/lpic1-section11"],
+ ["p", "Step 3: Create the practice scripts. fake-backup.sh simulates a long nightly job, cpu-hog.sh keeps one CPU busy for five minutes, and stubborn.sh ignores the polite stop signal like a hung service:"],
+ ["p", "printf '#!/bin/bash\\n# simulated nightly backup, runs for up to 30 minutes\\nfor i in $(seq 1 1800); do sleep 1; done\\n' > bin/fake-backup.sh"],
+ ["p", "printf '#!/bin/bash\\n# busy loop that ends by itself after 300 seconds\\nend=$((SECONDS+300)); while [ $SECONDS -lt $end ]; do :; done\\n' > bin/cpu-hog.sh"],
+ ["p", "printf '#!/bin/bash\\n# ignores SIGTERM, like a hung service\\ntrap \"echo stubborn: ignoring TERM\" TERM\\nwhile true; do sleep 1; done\\n' > bin/stubborn.sh"],
+ ["p", "chmod +x bin/*.sh"],
+ ["p", "Validation check: Run ls -l bin and bash -n bin/*.sh. All three scripts should be executable and bash -n should print nothing. Before each lab, run jobs and pgrep -a -u $USER -f 'bin/|sleep' to make sure nothing from an earlier lab is still running."],
+ ["h2", "Commands to Memorize"],
+ ["p", "ps, ps -ef, ps -elf, ps aux, ps -l, ps -o pid,ppid,ni,stat,comm, ps --sort, tty, pgrep, pgrep -a, pgrep -l, pgrep -u, pgrep -t, pgrep -f, pgrep -c, top, top -b -n 1, top keys P M 1 k r L q, uptime, free -h, nproc, /proc/loadavg, watch -n, command &, $!, Ctrl+Z, Ctrl+C, jobs, jobs -l, bg, fg, %1, kill, kill -l, kill -15, kill -9, kill -s SIGKILL, kill -STOP, kill -CONT, kill %1, killall, pkill, nohup, nohup.out, nice, nice -n, renice, renice -n -p, tmux, tmux new -s, tmux ls, tmux attach -t, Ctrl+B d % \" &, screen, screen -S, screen -ls, screen -r, and Ctrl+A d S | Tab c k \\."],
+ ["h2", "Memory hook"],
+ ["p", "Find it, then signal it. pgrep and ps find the PID; kill, pkill, and killall send the signal. Ask nicely first with 15 (TERM, the default), and force it only with 9 (KILL), which cannot be caught or ignored. 1 (HUP) is what a closing terminal sends, and nohup protects against it. For priority, nice values run from -20 to 19, and the higher the number, the nicer the process is to everyone else. Anyone can be nicer; only root can be less nice."],
+ ["h2", "Beginner Labs: Finding and Measuring Processes"],
+ ["lab", {
+   "title": "Lab 1: Inventory the processes on a workstation",
+   "scenario": "A user reports their workstation feels slow. Before you change anything, the service desk wants a snapshot of what is running.",
+   "task": "Capture your own processes, every process in two option styles, and the top five CPU users.",
+   "deliverable": "reports/ps-inventory.txt.",
+   "steps": [
+    "tty > reports/ps-inventory.txt; ps >> reports/ps-inventory.txt",
+    "ps -ef | head -5 >> reports/ps-inventory.txt; ps aux | head -5 >> reports/ps-inventory.txt",
+    "ps -eo pid,ppid,user,stat,ni,comm --sort=-pcpu | head -6 >> reports/ps-inventory.txt",
+    "Browse the full list at your own pace: ps -elf | less"
+   ],
+   "validation": "cat reports/ps-inventory.txt. Plain ps shows your bash shell and ps itself on your terminal; the ps -ef header shows UID PID PPID, and the ps aux header shows USER PID %CPU %MEM.",
+   "trap": "ps aux is BSD style with no dash; ps -ef is UNIX style. ps -aux is not the same as ps aux and may warn. A ? in the TTY column means the process has no terminal, which is normal for services."
+ }],
+ ["lab", {
+   "title": "Lab 2: Find a process by name, user, and terminal",
+   "scenario": "The backup team asks whether their job is still running and which terminal started it. They give you only the script name.",
+   "task": "Start the fake backup, then find it several ways with pgrep.",
+   "deliverable": "reports/pgrep.txt.",
+   "steps": [
+    "bin/fake-backup.sh &",
+    "pgrep fake-backup > reports/pgrep.txt; pgrep -a fake-backup >> reports/pgrep.txt; pgrep -l fake-backup >> reports/pgrep.txt",
+    "pgrep -l -u $USER bash >> reports/pgrep.txt; pgrep -l -t $(tty | cut -d/ -f3-) >> reports/pgrep.txt",
+    "pgrep -c -f 'bin/fake-backup' >> reports/pgrep.txt; kill %1"
+   ],
+   "validation": "cat reports/pgrep.txt and confirm the same PID appears on the first lines, that -a shows the full command, and that the -t search lists both your bash shell and fake-backup.sh.",
+   "trap": "pgrep matches the process name by default, and the name is cut to 15 characters. Use -f to match against the full command line. pgrep never lists itself, but ps | grep shows the grep."
+ }],
+ ["lab", {
+   "title": "Lab 3: Run a quick health check on load and memory",
+   "scenario": "Monitoring alerts that app02 is under pressure. Your manager wants the load averages and memory figures in a ticket within five minutes.",
+   "task": "Record uptime, load averages, CPU count, and memory in a human-readable form.",
+   "deliverable": "reports/health.txt.",
+   "steps": [
+    "uptime > reports/health.txt; uptime -p >> reports/health.txt; cat /proc/loadavg >> reports/health.txt",
+    "nproc >> reports/health.txt",
+    "free -h >> reports/health.txt; free -m >> reports/health.txt"
+   ],
+   "validation": "cat reports/health.txt and point out the 1, 5, and 15 minute load averages, the number of logged-in users, the CPU count, and the available column of free.",
+   "trap": "A load average only means something next to the CPU count: 2.0 is busy on one CPU and quiet on eight. In free, the available column, not free, shows how much memory programs can still get, because Linux uses spare memory as cache."
+ }],
+ ["lab", {
+   "title": "Lab 4: Triage a CPU spike in top",
+   "scenario": "A user says a script is eating the CPU. You need to see it live, sort by CPU and by memory, and save a snapshot for the ticket.",
+   "task": "Start the CPU hog, inspect it in top, and capture one batch-mode screen.",
+   "deliverable": "reports/top-snapshot.txt.",
+   "steps": [
+    "bin/cpu-hog.sh &",
+    "top, then press P to sort by CPU, M to sort by memory, P again, 1 to show each CPU, and q to quit.",
+    "top -b -n 1 | head -15 > reports/top-snapshot.txt",
+    "top -b -n 1 -u $USER | head -12 >> reports/top-snapshot.txt; kill %1"
+   ],
+   "validation": "grep -E 'load average|Tasks|cpu-hog' reports/top-snapshot.txt and confirm cpu-hog.sh is near the top with close to 100 in the %CPU column.",
+   "trap": "top's Tasks line counts running, sleeping, stopped, and zombie processes. A zombie has finished but has not been collected by its parent; killing the zombie itself does nothing."
+ }],
+ ["h2", "Intermediate Labs: Job Control and Signals"],
+ ["lab", {
+   "title": "Lab 5: Move a long job between the foreground and the background",
+   "scenario": "You started a long job in the foreground and need your prompt back without losing the job's progress.",
+   "task": "Suspend a foreground job, resume it in the background, start a second job in the background, and bring one back to the foreground.",
+   "deliverable": "reports/jobs.txt.",
+   "steps": [
+    "sleep 3000, then press Ctrl+Z. Note the job number in brackets and the word Stopped.",
+    "bg %1; sleep 4000 &; jobs -l > reports/jobs.txt",
+    "fg %2, then press Ctrl+Z again, then bg; jobs -l >> reports/jobs.txt",
+    "ps -o pid,stat,comm -p \"$(jobs -p | paste -sd,)\" >> reports/jobs.txt; kill %1 %2"
+   ],
+   "validation": "cat reports/jobs.txt and confirm two jobs listed as Running, and that the PIDs from jobs -l match the PIDs in the ps output.",
+   "trap": "Ctrl+Z stops (suspends) a job; Ctrl+C sends SIGINT and usually ends it. A job number needs a percent sign: kill %1 is job 1, but kill 1 targets PID 1. Jobs belong to one shell, so another terminal's jobs command will not see them."
+ }],
+ ["lab", {
+   "title": "Lab 6: Pause and resume a job during a maintenance window",
+   "scenario": "The storage team asks you to pause the backup for two minutes while they fail over a disk, then resume it exactly where it was.",
+   "task": "Stop the backup with SIGSTOP, confirm its state, and resume it with SIGCONT. List the signal names and numbers for the ticket.",
+   "deliverable": "reports/pause.txt and reports/signals.txt.",
+   "steps": [
+    "bin/fake-backup.sh & PID=$!",
+    "kill -STOP $PID; ps -o pid,stat,comm -p $PID > reports/pause.txt",
+    "kill -CONT $PID; ps -o pid,stat,comm -p $PID >> reports/pause.txt",
+    "kill -l > reports/signals.txt; kill -l 1 2 9 15 18 19 >> reports/signals.txt; kill $PID"
+   ],
+   "validation": "cat reports/pause.txt shows the state T (stopped) and then S (sleeping). tail -6 reports/signals.txt shows HUP, INT, KILL, TERM, CONT, and STOP, one per line.",
+   "trap": "A signal can be named three ways: 15, TERM, or SIGTERM. SIGSTOP, like SIGKILL, cannot be caught or ignored. The process state letters are R running, S sleeping, D uninterruptible sleep, T stopped, and Z zombie."
+ }],
+ ["lab", {
+   "title": "Lab 7: Terminate a hung service that ignores the polite signal",
+   "scenario": "A service will not shut down. The runbook says to try SIGTERM first, wait, and use SIGKILL only as a last resort.",
+   "task": "Send TERM to the stubborn script by job number, confirm it ignored the signal, then force it.",
+   "deliverable": "reports/hung-service.txt.",
+   "steps": [
+    "bin/stubborn.sh &",
+    "kill %1; sleep 2; jobs -l > reports/hung-service.txt",
+    "kill -s SIGKILL %1; sleep 1; jobs -l >> reports/hung-service.txt",
+    "pgrep -c -f bin/stubborn >> reports/hung-service.txt"
+   ],
+   "validation": "cat reports/hung-service.txt. The first jobs line still shows Running and the terminal printed stubborn: ignoring TERM. The second shows Killed, and the count is 0.",
+   "trap": "kill with no signal sends 15 (TERM). A program can catch or ignore TERM, HUP, and INT, but never 9 (KILL). KILL gives the program no chance to clean up, so files may be left half written."
+ }],
+ ["lab", {
+   "title": "Lab 8: Clean up a batch of runaway jobs by name",
+   "scenario": "A cron mistake left several copies of a job running. You need to stop all of them without hunting for each PID.",
+   "task": "Start several sleep jobs, preview the match with pgrep, then end them with pkill. Repeat with killall.",
+   "deliverable": "reports/bulk-kill.txt.",
+   "steps": [
+    "for i in 1 2 3; do sleep 700 & done; pgrep -a -f 'sleep 700' > reports/bulk-kill.txt",
+    "pkill -15 -f 'sleep 700'; sleep 1; echo \"after pkill: $(pgrep -c -f 'sleep 700')\" >> reports/bulk-kill.txt",
+    "for i in 1 2 3; do sleep 800 & done; killall sleep >> reports/bulk-kill.txt 2>&1",
+    "echo \"after killall: $(pgrep -c -u $USER -x sleep)\" >> reports/bulk-kill.txt"
+   ],
+   "validation": "cat reports/bulk-kill.txt shows three matches, then after pkill: 0, then after killall: 0. Any Operation not permitted lines are other users' sleep processes that you were not allowed to touch.",
+   "trap": "Always run the pgrep with the same pattern first; pkill uses the same matching rules. killall matches by exact program name and tries every process with that name on the system, so as root it can stop far more than you meant to."
+ }],
+ ["lab", {
+   "title": "Lab 9: Keep a job running after you disconnect",
+   "scenario": "You need to start the backup from a terminal you are about to close, and it must keep running after you leave.",
+   "task": "Start one job with nohup and one without in a second terminal window, close that window, and check which job survived.",
+   "deliverable": "reports/nohup.txt.",
+   "steps": [
+    "Open a second terminal window and run: cd ~/lpic1-section11; nohup bin/fake-backup.sh > reports/backup.out 2>&1 &",
+    "In the same window run: sleep 901 &",
+    "Close that window with its close button (do not type exit). Back in the first window run: pgrep -a -f 'fake-backup|sleep 901' > reports/nohup.txt",
+    "pkill -f bin/fake-backup"
+   ],
+   "validation": "cat reports/nohup.txt lists fake-backup.sh but not sleep 901.",
+   "trap": "Closing a terminal sends SIGHUP to its jobs; nohup makes the command ignore it. Without a redirect, nohup writes output to nohup.out in the current folder, or to ~/nohup.out if it cannot write there. nohup does not put the job in the background; you still need the &."
+ }],
+ ["h2", "Advanced Labs: Priority, Watching, and Terminal Multiplexers"],
+ ["lab", {
+   "title": "Lab 10: Start a report job at low priority",
+   "scenario": "A long report must run during business hours, but it must not slow down anyone else's work.",
+   "task": "Start jobs with different nice values, see the values in ps, and test the limit for normal users.",
+   "deliverable": "reports/nice.txt.",
+   "steps": [
+    "nice -n 19 sleep 900 & nice sleep 901 & sleep 902 &",
+    "ps -l | head -1 > reports/nice.txt; ps -l | grep sleep >> reports/nice.txt",
+    "nice -n -5 sleep 1 >> reports/nice.txt 2>&1",
+    "pkill -f 'sleep 90[0-2]'"
+   ],
+   "validation": "cat reports/nice.txt. The NI column shows 19, 10, and 0, and the PRI column shows 99, 90, and 80. The last line says nice cannot set the niceness: Permission denied (the sleep still ran).",
+   "trap": "nice with no -n adds 10. nice -5 means a nice value of 5, and nice --5 means -5. Use -n to avoid the confusion. Only root can set a negative value. ps -l shows PRI as 80 plus the nice value; top shows PR as 20 plus the nice value."
+ }],
+ ["lab", {
+   "title": "Lab 11: Lower the priority of a running CPU hog",
+   "scenario": "A colleague's script is hogging a CPU on a shared server. You may not kill it, but you can make it yield to everyone else.",
+   "task": "Renice the running hog from the command line, try to raise its priority again as a normal user, and change it once more from inside top.",
+   "deliverable": "reports/renice.txt.",
+   "steps": [
+    "bin/cpu-hog.sh & HOG=$!",
+    "renice -n 5 -p $HOG > reports/renice.txt; ps -o pid,ni,comm -p $HOG >> reports/renice.txt",
+    "renice -n -5 -p $HOG >> reports/renice.txt 2>&1",
+    "top, press L, type cpu-hog and press Enter to find it, press r, enter the PID, enter 15, then press q.",
+    "ps -o pid,ni,comm -p $HOG >> reports/renice.txt; kill $HOG"
+   ],
+   "validation": "cat reports/renice.txt shows the change to 5, a Permission denied line, and finally NI 15.",
+   "trap": "renice works on processes that are already running; nice only starts new ones. A normal user can raise a nice value but not lower it again. Recent util-linux versions changed whether renice -n sets an absolute value or adds to the current one, so check man renice on your build."
+ }],
+ ["lab", {
+   "title": "Lab 12: Watch a queue drain without retyping the command",
+   "scenario": "During a migration you need to watch the number of worker processes fall to zero and report when it does.",
+   "task": "Start three workers that finish at different times and watch the count update every two seconds.",
+   "deliverable": "reports/watch.txt.",
+   "steps": [
+    "for i in 1 2 3; do sleep $((i*20)) & done",
+    "watch -n 2 'pgrep -c -u $USER -x sleep'. Watch the count drop from 3 to 0 over about a minute, then press Ctrl+C.",
+    "echo \"workers left: $(pgrep -c -u $USER -x sleep)\" > reports/watch.txt; watch -n 5 -d free -h, then press Ctrl+C after two updates."
+   ],
+   "validation": "cat reports/watch.txt shows workers left: 0.",
+   "trap": "watch reruns the whole command every interval (2 seconds by default) and -d highlights what changed. Quote the command when it contains pipes or variables, or your shell will expand them only once."
+ }],
+ ["lab", {
+   "title": "Lab 13: Run a patch session in tmux and detach from it",
+   "scenario": "You are patching web01 over a flaky connection. If your session drops, the patch must keep running and you must be able to reattach.",
+   "task": "Start a named tmux session, split it into panes, detach, list it, reattach, and close it.",
+   "deliverable": "reports/tmux.txt.",
+   "steps": [
+    "tmux new -s patching, then run top in the first pane.",
+    "Press Ctrl+B then % to split side by side, and Ctrl+B then \" to split top and bottom. Move between panes with Ctrl+B and an arrow key. Run uptime in one of the new panes.",
+    "Press Ctrl+B then d to detach. Run: tmux ls > reports/tmux.txt",
+    "tmux attach -t patching, confirm top is still running, then press Ctrl+B then & and answer y to close the window.",
+    "tmux ls >> reports/tmux.txt 2>&1"
+   ],
+   "validation": "cat reports/tmux.txt shows patching: 1 windows on the first line and no server running (or no sessions) on the last.",
+   "trap": "The tmux prefix is Ctrl+B; the screen prefix is Ctrl+A. Detaching leaves everything running; closing the window or typing exit in the last pane ends it."
+ }],
+ ["lab", {
+   "title": "Lab 14: Run the nightly job inside GNU screen",
+   "scenario": "An older jump host only has screen. You need to start the backup there, split the view to monitor it, and leave it running.",
+   "task": "Start a named screen session, run the backup, split and add regions, detach, reattach, and quit.",
+   "deliverable": "reports/screen.txt.",
+   "steps": [
+    "screen -S nightly (press Enter or Space past any welcome page), then run bin/fake-backup.sh",
+    "Press Ctrl+A then d to detach. Run: screen -ls > reports/screen.txt; then screen -r nightly",
+    "Press Ctrl+A then S to split top and bottom, Ctrl+A then Tab to move to the new region, and Ctrl+A then c to start a shell in it. Run top. Press Ctrl+A then | for a side-by-side split and Ctrl+A then A to rename the current window.",
+    "Press Ctrl+A then k and answer y to kill one window, then Ctrl+A then \\ and answer y to quit screen completely.",
+    "screen -ls >> reports/screen.txt; pkill -f bin/fake-backup"
+   ],
+   "validation": "cat reports/screen.txt shows a line with nightly and (Detached), and at the end No Sockets found.",
+   "trap": "A new region in screen is empty until you press Ctrl+A then c or select a window for it. screen -r reattaches; screen -ls lists sessions. Ctrl+A then \\ ends every window in the session."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+   "Mixing up ps styles. ps aux is BSD style, ps -ef and ps -elf are UNIX style, and long options use two dashes.",
+   "Forgetting the default signal. kill, pkill, and killall send 15 (SIGTERM) unless told otherwise.",
+   "Expecting SIGKILL or SIGSTOP to be caught. 9 and 19 cannot be ignored; 1, 2, and 15 can.",
+   "Leaving out the percent sign. kill %2 is job 2; kill 2 is PID 2.",
+   "Confusing Ctrl+Z and Ctrl+C. Ctrl+Z suspends the job; Ctrl+C sends SIGINT and usually ends it.",
+   "Thinking nohup backgrounds a job. It only ignores SIGHUP; add & to get your prompt back. Output goes to nohup.out.",
+   "Running killall casually. It matches every process with that exact name, and as root that can include system services.",
+   "Matching the wrong thing with pgrep or pkill. They match the process name by default; -f matches the whole command line.",
+   "Reading nice values backwards. -20 is the highest priority and 19 the lowest; a higher number is nicer to others.",
+   "Misreading nice -5. It means +5. A negative value needs nice -n -5 or nice --5, and root.",
+   "Forgetting nice's default. nice with no value adds 10.",
+   "Expecting a normal user to raise priority. Only root can set a negative nice value or lower an existing one.",
+   "Mixing up the multiplexer prefixes. tmux uses Ctrl+B (% and \" split, d detaches); screen uses Ctrl+A (S and | split, d detaches).",
+   "Reading free's free column as usable memory. The available column is the one that matters."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes. Use only your Linux Mint VM and the scripts in ~/lpic1-section11. Make sure jobs and pgrep -a -f bin/ show nothing running before you begin."],
+ ["numbered", [
+   "Save the load averages, CPU count, and available memory to reports/challenge-health.txt.",
+   "Start the fake backup in the foreground, suspend it, resume it in the background, and show its job number and PID.",
+   "Pause the backup with a signal, prove it is stopped, and resume it.",
+   "Start the stubborn script, show that the default signal does not stop it, and then stop it for good.",
+   "Start three sleep 600 jobs and end all of them with one command, after previewing the match.",
+   "Start the CPU hog at nice 10, then lower its priority further to 15 while it runs.",
+   "Start a backup that will survive closing the terminal, with its output in reports/challenge-backup.out.",
+   "Start a named tmux session running top, detach, prove it still exists, then reattach and close it."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each file, write a short sentence explaining what it proves, and confirm that no practice processes are still running."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+   "Service desk request: “The workstation is slow. Tell me the load averages and what is using the most CPU.”",
+   "Storage team request: “Pause the backup while we fail over the disk, then let it carry on from where it stopped.”",
+   "On-call request: “The service ignores a normal stop. Get rid of it, but only after trying the polite way.”",
+   "Operations request: “A bad cron entry started a dozen copies of the same job. Stop them all.”",
+   "Change manager request: “Start the long migration now and make sure it keeps going when your VPN drops.”",
+   "Shared server request: “Someone’s script is hogging a CPU. Don’t kill it; make it give way to everyone else.”",
+   "Team lead request: “Start tonight’s report job at the lowest possible priority.”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+   "I can list processes with ps, ps -ef, ps -elf, and ps aux, and choose columns with ps -o.",
+   "I can find processes by name, user, terminal, and full command line with pgrep.",
+   "I can read uptime, the load averages, and free -h, and explain the available column.",
+   "I can sort top by CPU and memory, filter it, renice from it, and save a batch-mode snapshot.",
+   "I can start a job with &, suspend it with Ctrl+Z, and move it with bg and fg using job numbers.",
+   "I can list jobs with jobs and jobs -l and match job numbers to PIDs.",
+   "I can name and number HUP, INT, KILL, TERM, STOP, and CONT, and list all signals with kill -l.",
+   "I can send signals with kill by PID or by %job, and with pkill and killall by name.",
+   "I can explain why TERM may be ignored and when KILL is the right choice.",
+   "I can keep a job running after logout with nohup and say where its output goes.",
+   "I can start a process with nice, change it with renice, and explain the nice range and the root-only limits.",
+   "I can create, split, detach from, list, and reattach to tmux and screen sessions."
+ ], 4]
+]

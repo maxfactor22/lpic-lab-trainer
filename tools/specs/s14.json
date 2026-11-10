@@ -1,0 +1,268 @@
+[
+ ["h1", "LPIC-1 Section 14 Scenario-Based IT Engineering Lab Guide"],
+ ["sub", "Objective 101.1: Determine and configure hardware settings. Inspect device files, /proc and /sys, PCI and USB devices, kernel modules, kernel messages, udev and hotplug events."],
+ ["h2", "How to use this workbook"],
+ ["p", "Treat each lab like a hardware ticket: a driver question, a missing device, or a vendor asking for details. Read the scenario, gather the evidence with the right tool, save it under reports/, and explain in a sentence what it shows."],
+ ["p", "Kernel modules can be removed and inserted on a live system, but doing that to a module your VM is using can freeze the display, the network or the disk. In this workbook you inspect modules with lsmod and modinfo, and see what modprobe would do with its --show-depends option, which loads nothing. The commands that really load or remove modules (insmod, rmmod, modprobe and modprobe -r) are described so you can answer exam questions about them. Don't run them on your VM."],
+ ["p", "Your Linux Mint VM may name its main disk sda, vda or nvme0n1. Lab Setup stores the real name in the DISK variable. Mint restricts dmesg to administrators, so the kernel message lab uses sudo."],
+ ["h2", "Lab Setup"],
+ ["p", "Step 1: Make sure the hardware listing tools are installed. Most Mint installs already have them, and apt will just report that they are the newest version:"],
+ ["p", "sudo apt install pciutils usbutils bc"],
+ ["p", "Step 2: Create the practice workspace:"],
+ ["p", "mkdir -p ~/lpic1-section14/{reports,images,configs}"],
+ ["p", "cd ~/lpic1-section14"],
+ ["p", "Step 3: Record the name of your VM's main disk. Rerun this line whenever you open a new terminal:"],
+ ["p", "DISK=$(lsblk -dno NAME,TYPE | awk '$2==\"disk\"{print $1; exit}'); echo $DISK"],
+ ["p", "Step 4: Create a sample module policy file to review and a small image file to use as a hotplug device in Lab 13:"],
+ ["p", "printf '# Requested by the desktop security team for kiosk01\\nblacklist pcspkr\\ninstall usb-storage /bin/true\\noptions loop max_loop=16\\nalias net-pf-31 off\\n' > configs/kiosk-modprobe.conf"],
+ ["p", "truncate -s 128M images/hotplug.img"],
+ ["p", "Validation check: Run ls -lR and confirm configs/kiosk-modprobe.conf and images/hotplug.img exist. Run echo $DISK and confirm it prints a name such as sda, vda or nvme0n1."],
+ ["h2", "Commands to Memorize"],
+ ["p", "ls -l /dev, block (b) and character (c) devices, major and minor numbers, lsblk -o NAME,MAJ:MIN, /proc/devices, /proc/meminfo, /proc/cpuinfo, /proc/modules, /sys/block, lspci, lspci -t, lspci -v, lspci -vv, lspci -vvv, lspci -k, lsusb, lsusb -t, lsusb -v, lsmod, modinfo, modinfo -F, modprobe, modprobe -r, modprobe -v, modprobe --show-depends, insmod, rmmod, depmod, /lib/modules/$(uname -r), modules.dep, /etc/modprobe.d, blacklist, dmesg, dmesg -T, journalctl -k, udevadm info, udevadm monitor, /etc/udev/rules.d, /lib/udev/rules.d, /dev/disk/by-path, /dev/disk/by-id, /media and D-Bus."],
+ ["h2", "Memory hook"],
+ ["p", "Follow the chain from hardware to you. The hardware sits on a bus, which lspci and lsusb show. The kernel talks to it through a driver module, which lsmod, modinfo and modprobe manage. The kernel announces what it found in dmesg and publishes the details in /sys. udev reads those details and creates the device file in /dev, and you and your programs only ever talk to that file. When something is missing, walk the chain in that order: bus, module, kernel message, /sys, /dev."],
+ ["h2", "Beginner Labs: Device Files and Pseudo Filesystems"],
+ ["lab", {
+  "title": "Lab 1: Tell block devices from character devices",
+  "scenario": "A backup vendor's agent refuses to run against a device and logs: not a block device. The vendor asks you to confirm the device type of several files on the host.",
+  "task": "Use long listings to identify block and character device files, and count each kind in /dev.",
+  "deliverable": "reports/device-types.txt",
+  "steps": [
+   "ls -l /dev/$DISK /dev/tty2 /dev/null /dev/zero /dev/sr0 > reports/device-types.txt 2>&1",
+   "echo \"Block devices in /dev: $(find /dev -maxdepth 1 -type b | wc -l)\" >> reports/device-types.txt",
+   "echo \"Character devices in /dev: $(find /dev -maxdepth 1 -type c | wc -l)\" >> reports/device-types.txt"
+  ],
+  "validation": "grep -c '^b' reports/device-types.txt and grep -c '^c' reports/device-types.txt both return at least 1.",
+  "trap": "The first character of a long listing is the file type: b for block, c for character, d for directory and l for a symbolic link. Block devices such as disks move data in blocks and allow random access; character devices such as terminals and /dev/null handle a stream of bytes."
+ }],
+ ["lab", {
+  "title": "Lab 2: Read major and minor numbers",
+  "scenario": "A storage driver's documentation refers to devices by major and minor number. Your teammate asks what those numbers are for the disk and its partitions.",
+  "task": "Show the major and minor numbers in two ways and find the driver name for the major number in /proc/devices.",
+  "deliverable": "reports/major-minor.txt",
+  "steps": [
+   "ls -l /dev/${DISK}* > reports/major-minor.txt",
+   "lsblk -o NAME,MAJ:MIN,TYPE >> reports/major-minor.txt",
+   "awk '/^Block devices/{b=1} b' /proc/devices >> reports/major-minor.txt"
+  ],
+  "validation": "cat reports/major-minor.txt. The number before the comma in ls -l matches the number before the colon in lsblk, and the same number appears in the Block devices list (8 is sd, 252 or 253 is often virtblk or device-mapper, 259 is blkext for NVMe).",
+  "trap": "The major number identifies the driver, or class of device. The minor number identifies one device that driver handles. In ls -l the size column is replaced by major, minor for device files."
+ }],
+ ["lab", {
+  "title": "Lab 3: Find hardware facts in /proc",
+  "scenario": "A capacity planner asks for app02's memory total, CPU count and kernel version, and wants to know where tools such as free get their numbers.",
+  "task": "Confirm /proc and /sys are pseudo filesystems, then pull the facts from /proc and compare them with the matching commands.",
+  "deliverable": "reports/proc-facts.txt",
+  "steps": [
+   "findmnt -t proc,sysfs > reports/proc-facts.txt",
+   "grep -E 'MemTotal|MemFree|SwapTotal' /proc/meminfo >> reports/proc-facts.txt",
+   "free -k >> reports/proc-facts.txt",
+   "echo \"CPUs in cpuinfo: $(grep -c ^processor /proc/cpuinfo), nproc says: $(nproc)\" >> reports/proc-facts.txt",
+   "cat /proc/version >> reports/proc-facts.txt"
+  ],
+  "validation": "grep MemTotal reports/proc-facts.txt and compare it with the total column of the Mem row from free -k. They are the same number.",
+  "trap": "/proc and /sys live in memory, not on disk, and are rebuilt at every boot. Files in /proc show a size of 0 in ls -l even though cat prints content. Tools such as free, lsblk, lspci and lsmod read these files and format them for you."
+ }],
+ ["lab", {
+  "title": "Lab 4: Calculate a disk size from /sys",
+  "scenario": "A minimal rescue image on db01 has no lsblk. A colleague needs the exact disk size in bytes, and you want to prove the /sys method gives the right answer.",
+  "task": "Read the sector count and sector size from /sys, calculate the size in bytes, and check it against lsblk.",
+  "deliverable": "reports/sys-size.txt",
+  "steps": [
+   "ls /sys/block/$DISK > reports/sys-size.txt",
+   "cat /sys/block/$DISK/size /sys/block/$DISK/queue/logical_block_size >> reports/sys-size.txt",
+   "echo \"$(cat /sys/block/$DISK/size) * 512\" | bc >> reports/sys-size.txt",
+   "lsblk -b -d -n -o SIZE /dev/$DISK >> reports/sys-size.txt"
+  ],
+  "validation": "tail -2 reports/sys-size.txt prints the same number twice.",
+  "trap": "The size file in /sys/block always counts 512-byte units, even on a disk with 4096-byte sectors, so always multiply by 512. Each partition has its own subdirectory, such as /sys/block/sda/sda1, with its own size file."
+ }],
+ ["h2", "Intermediate Labs: Buses, Peripherals and Kernel Modules"],
+ ["lab", {
+  "title": "Lab 5: Inventory the PCI bus",
+  "scenario": "The virtualization team asks which storage and network controllers your VM presents, and which kernel driver runs each one.",
+  "task": "List the PCI devices at increasing levels of detail, show the bus tree, and match the storage controller to a disk's by-path name.",
+  "deliverable": "reports/pci.txt and reports/pci-detail.txt",
+  "steps": [
+   "lspci > reports/pci.txt",
+   "lspci -tv >> reports/pci.txt",
+   "lspci -k | grep -A3 -i -E 'sata|ide|scsi|storage|nvme|ethernet' >> reports/pci.txt",
+   "sudo lspci -vvv > reports/pci-detail.txt",
+   "ls -l /dev/disk/by-path >> reports/pci.txt"
+  ],
+  "validation": "wc -l reports/pci.txt reports/pci-detail.txt shows the detailed file is much longer, and grep -c 'Kernel driver in use' reports/pci.txt returns at least 1.",
+  "trap": "Each extra v adds detail, up to -vvv, and some details need sudo. -t shows the tree of buses and bridges. -k shows the kernel driver and modules for each device. The slot address in front of each line, such as 00:0d.0, also appears in the /dev/disk/by-path names."
+ }],
+ ["lab", {
+  "title": "Lab 6: Inventory USB devices",
+  "scenario": "Security asks you to confirm which USB devices are connected to kiosk01 before it goes on the floor.",
+  "task": "List USB devices, show the hub tree, and pull the vendor and product details.",
+  "deliverable": "reports/usb.txt",
+  "steps": [
+   "lsusb > reports/usb.txt",
+   "lsusb -t >> reports/usb.txt",
+   "sudo lsusb -v 2>/dev/null | grep -E '^Bus|idVendor|idProduct|iProduct' >> reports/usb.txt",
+   "ls -l /dev/disk/by-id | grep -i usb >> reports/usb.txt || echo 'No USB disks attached' >> reports/usb.txt"
+  ],
+  "validation": "grep -c '^Bus' reports/usb.txt. Expect at least one root hub line. If the file is empty, the VM has no USB controller enabled; record that as your answer.",
+  "trap": "lsusb lists every USB device, including the root hubs that belong to the controller. A USB flash drive shows up in lsusb and also as an sd disk in lsblk and /dev/disk/by-id. lsusb -t shows which driver, such as usb-storage, is bound to each port."
+ }],
+ ["lab", {
+  "title": "Lab 7: List the loaded kernel modules",
+  "scenario": "After a kernel update on app02, a teammate asks which modules are loaded and which ones other modules depend on.",
+  "task": "List the loaded modules, find the most depended-on ones, and compare lsmod with its source file.",
+  "deliverable": "reports/modules.txt",
+  "steps": [
+   "lsmod > reports/modules.txt",
+   "echo \"Loaded modules: $(lsmod | tail -n +2 | wc -l)\" >> reports/modules.txt",
+   "lsmod | tail -n +2 | sort -k3 -n -r | head -5 >> reports/modules.txt",
+   "head -3 /proc/modules >> reports/modules.txt",
+   "grep -c . /lib/modules/$(uname -r)/modules.builtin >> reports/modules.txt"
+  ],
+  "validation": "head -1 reports/modules.txt shows the header Module Size Used by, and the Loaded modules line gives a count.",
+  "trap": "lsmod only formats /proc/modules. Drivers built into the kernel never appear in lsmod; they are listed in modules.builtin instead. The Used by column shows how many modules depend on this one, and a module in use cannot be removed."
+ }],
+ ["lab", {
+  "title": "Lab 8: Describe a module with modinfo",
+  "scenario": "A vendor asks which driver file, version, license and parameters a loaded module has on your build.",
+  "task": "Pick a loaded module and report its details, then compare it with a module that is built into the kernel.",
+  "deliverable": "reports/modinfo.txt",
+  "steps": [
+   "MOD=$(lsmod | awk 'NR==2{print $1}'); echo \"Module: $MOD\" > reports/modinfo.txt",
+   "modinfo $MOD >> reports/modinfo.txt",
+   "modinfo -F filename $MOD >> reports/modinfo.txt",
+   "modinfo -F depends $MOD >> reports/modinfo.txt",
+   "modinfo ext4 | head -3 >> reports/modinfo.txt"
+  ],
+  "validation": "grep -E '^filename' reports/modinfo.txt shows a path under /lib/modules ending in .ko or .ko.zst, and the ext4 lines show either a path or (builtin).",
+  "trap": "Module files end in .ko, and on newer kernels such as Mint 22 they are compressed as .ko.zst. modinfo and modprobe accept module names, not paths, and treat dashes and underscores as the same. The parm lines list the options you can set in /etc/modprobe.d."
+ }],
+ ["lab", {
+  "title": "Lab 9: Preview what modprobe would load",
+  "scenario": "Before a maintenance window on db01, the storage team asks what loading the dm_mirror module would pull in. You must answer without changing the running kernel.",
+  "task": "Show the dependency chain for dm_mirror with modprobe --show-depends and confirm it from modules.dep.",
+  "deliverable": "reports/dm-mirror-deps.txt",
+  "steps": [
+   "modprobe --show-depends dm_mirror > reports/dm-mirror-deps.txt",
+   "grep 'dm-mirror' /lib/modules/$(uname -r)/modules.dep >> reports/dm-mirror-deps.txt",
+   "lsmod | grep dm_mirror >> reports/dm-mirror-deps.txt || echo 'dm_mirror is not loaded' >> reports/dm-mirror-deps.txt",
+   "Described only. Don't run on your VM: sudo modprobe -v dm_mirror (loads the module and its dependencies), sudo modprobe -r dm_mirror (removes it and unused dependencies), sudo insmod /full/path/module.ko (loads one file, no dependencies), sudo rmmod module (removes one module) and sudo depmod -a (rebuilds modules.dep)."
+  ],
+  "validation": "grep -c -E 'insmod|builtin' reports/dm-mirror-deps.txt returns at least 2, one line for each module in the chain.",
+  "trap": "insmod needs the full path to the .ko file and does not load dependencies. modprobe takes the short name, reads modules.dep and loads dependencies first. The file is dm-mirror.ko but lsmod shows dm_mirror, so search lsmod with an underscore."
+ }],
+ ["h2", "Advanced Labs: Module Policy, Kernel Messages and udev"],
+ ["lab", {
+  "title": "Lab 10: Review a module blacklist request",
+  "scenario": "The desktop security team sent configs/kiosk-modprobe.conf for kiosk01 and wants it reviewed before it goes into /etc/modprobe.d.",
+  "task": "Read the current module policy on your VM, then explain each line of the requested file. Do not copy it into /etc.",
+  "deliverable": "reports/modprobe-review.txt",
+  "steps": [
+   "ls /etc/modprobe.d /etc/modules-load.d > reports/modprobe-review.txt",
+   "grep -rhE '^(blacklist|options|install|alias)' /etc/modprobe.d | head -20 >> reports/modprobe-review.txt",
+   "cat configs/kiosk-modprobe.conf >> reports/modprobe-review.txt",
+   "nano reports/modprobe-review.txt and add one line per directive in the request: blacklist stops automatic loading by alias, install replaces the load command (here /bin/true, so nothing loads), options sets a module parameter, and alias maps a name to a module."
+  ],
+  "validation": "grep -c -E 'blacklist|install|options|alias' reports/modprobe-review.txt returns at least 8.",
+  "trap": "blacklist only stops automatic loading. A person or script can still run modprobe for that module, which is why the install line is used to block it completely. Files in /etc/modprobe.d must end in .conf, and modules needed early in boot also need sudo update-initramfs -u after a change."
+ }],
+ ["lab", {
+  "title": "Lab 11: Read the kernel's hardware messages",
+  "scenario": "A user reports that a disk on app02 was slow to appear at boot. You need the kernel's messages about the disk controller and the disk.",
+  "task": "Capture the start of the kernel ring buffer, filter it for storage messages with readable timestamps, and compare it with the journal.",
+  "deliverable": "reports/kernel-messages.txt",
+  "steps": [
+   "sudo dmesg | head -20 > reports/kernel-messages.txt",
+   "sudo dmesg -T | grep -i -E \"$DISK|ata|scsi|nvme\" | head -20 >> reports/kernel-messages.txt",
+   "sudo dmesg -l err,warn | tail -10 >> reports/kernel-messages.txt",
+   "journalctl -k -b --no-pager | grep -i \"$DISK\" | head -5 >> reports/kernel-messages.txt"
+  ],
+  "validation": "grep -c -i \"$DISK\" reports/kernel-messages.txt returns at least 1.",
+  "trap": "On Mint, plain dmesg fails with Operation not permitted because dmesg_restrict is on, so use sudo. The ring buffer has a fixed size and old messages roll off; journalctl -k keeps kernel messages from this boot (-b) in the journal. Never run dmesg -c on a server you are troubleshooting, because it clears the buffer."
+ }],
+ ["lab", {
+  "title": "Lab 12: Ask udev what it knows about a disk",
+  "scenario": "A storage script needs the disk's model, serial number and stable link names. The developer asks where those come from.",
+  "task": "Query udev's database for the disk, list the rules directories, and find where the /dev/disk links come from.",
+  "deliverable": "reports/udev-disk.txt",
+  "steps": [
+   "udevadm info --query=all --name=/dev/$DISK > reports/udev-disk.txt",
+   "grep -E 'DEVLINKS|ID_BUS|ID_MODEL|ID_SERIAL|ID_PATH' reports/udev-disk.txt",
+   "ls /lib/udev/rules.d | head -20 >> reports/udev-disk.txt",
+   "ls -l /etc/udev/rules.d >> reports/udev-disk.txt",
+   "grep -l 'by-id' /lib/udev/rules.d/*.rules >> reports/udev-disk.txt"
+  ],
+  "validation": "grep -c 'by-' reports/udev-disk.txt returns at least 2, from the S: link lines and the DEVLINKS line. The last line names the rules file that creates them, usually 60-persistent-storage.rules.",
+  "trap": "The kernel discovers a device and sends an event. udev reads the details from /sys, applies its rules, and creates the /dev file and links such as /dev/disk/by-id. Packaged rules live in /lib/udev/rules.d; local rules go in /etc/udev/rules.d, end in .rules, and override a packaged file with the same name."
+ }],
+ ["lab", {
+  "title": "Lab 13: Watch a hotplug event",
+  "scenario": "Security wants proof that the kernel and udev announce a new storage device the moment it appears, the way they would for a USB stick plugged into kiosk01.",
+  "task": "Run udevadm monitor while attaching and detaching the image file as a loop device, then record where desktop sessions auto-mount removable disks and confirm D-Bus is running.",
+  "deliverable": "reports/hotplug-events.txt and reports/hotplug-notes.txt",
+  "steps": [
+   "sudo -v",
+   "timeout 15 udevadm monitor --kernel --udev --subsystem-match=block > reports/hotplug-events.txt &",
+   "sleep 2; HP=$(sudo losetup -f --show images/hotplug.img); sleep 2; sudo losetup -d $HP; wait",
+   "ls -ld /media/$USER > reports/hotplug-notes.txt 2>&1",
+   "systemctl is-active dbus >> reports/hotplug-notes.txt"
+  ],
+  "validation": "grep -E '^(KERNEL|UDEV) *\\[' reports/hotplug-events.txt shows change events for the loop device from both the kernel and udev, and reports/hotplug-notes.txt ends with active. The prompt returns when the 15-second timeout ends.",
+  "trap": "A coldplug device is present at boot; a hotplug device is added while the system runs. udev handles both. udev listens to kernel events, not D-Bus; after udev creates the device files, desktop services talk about the new device over D-Bus and may mount it under /media/username. Some devices must also be enabled in the BIOS or UEFI setup before the kernel can see them at all."
+ }],
+ ["h2", "Common Exam Traps"],
+ ["bullets", [
+  "Mixing up b and c in ls -l. b is a block device such as a disk; c is a character device such as a terminal or /dev/null.",
+  "Swapping major and minor. The major number identifies the driver; the minor number identifies one device it handles.",
+  "Thinking /proc and /sys are on disk. Both are pseudo filesystems in memory, rebuilt at every boot.",
+  "Reading /sys/block/DEVICE/size as bytes or as real sectors. It always counts 512-byte units.",
+  "Forgetting which lspci option shows the tree (-t) and which add detail (-v, -vv, -vvv). -k shows the kernel driver.",
+  "Expecting lsusb to show a disk's device file. It shows USB devices; lsblk and /dev/disk/by-id give the sd name.",
+  "Using insmod with a short module name. insmod needs the full path to the .ko file and does not load dependencies.",
+  "Forgetting that modprobe resolves dependencies from modules.dep, which depmod builds, and that modprobe -r removes them too.",
+  "Searching lsmod for dm-mirror. Loaded module names use underscores: dm_mirror.",
+  "Expecting built-in drivers in lsmod. They are listed in /lib/modules/$(uname -r)/modules.builtin.",
+  "Thinking blacklist makes a module impossible to load. It stops automatic loading only; an install line pointing to /bin/true blocks it completely.",
+  "Running dmesg -c to read messages. It clears the ring buffer; use dmesg, dmesg -T or journalctl -k.",
+  "Putting local udev rules in /lib/udev/rules.d. Local rules belong in /etc/udev/rules.d and must end in .rules.",
+  "Saying udev talks to D-Bus. udev listens to kernel events; other services use D-Bus after udev creates the device files."
+ ]],
+ ["h2", "Scenario-Based Challenge Exam"],
+ ["p", "Complete these tasks without notes, using only your Linux Mint VM and the files in ~/lpic1-section14. Run Step 3 of the Lab Setup first so DISK is set, and save each answer under reports/ with a name that starts with challenge-. Do not load or remove any module."],
+ ["numbered", [
+  "Prove that your main disk is a block device and /dev/tty2 is a character device, and give the major and minor numbers of the disk.",
+  "Report total memory and CPU count from /proc, and name the command that formats each one for you.",
+  "Calculate the main disk's size in bytes from /sys and prove it matches lsblk.",
+  "Name the PCI storage controller and the kernel driver in use for it.",
+  "List every USB device and the driver bound to each port.",
+  "For the first module in lsmod, give its file path, license and dependencies.",
+  "Show which modules modprobe would load for dm_mirror without loading anything, and write the commands that would load and remove it.",
+  "Capture the udev events produced when images/hotplug.img is attached and detached as a loop device."
+ ]],
+ ["p", "Your final handoff is the reports directory. For each challenge file, write one sentence explaining what it proves and which link in the chain from bus to /dev it covers."],
+ ["h2", "LPIC-Style Practical Questions"],
+ ["bullets", [
+  "Vendor request: “Which network and storage controllers does this VM present, and which kernel driver is handling each one?”",
+  "Security request: “Make sure USB storage can never be loaded on kiosk01, even by someone running modprobe. What line would you add, and where?”",
+  "Storage team request: “Before tonight's change, tell me every module that loading dm_mirror will pull in. Don't load it yet.”",
+  "Developer request: “Our rescue image has no lsblk. Show me how to get the exact size of a disk from /sys.”",
+  "Help desk request: “A user says their USB stick never shows up. Where would you look first to see whether the kernel noticed it?”",
+  "Backup vendor request: “Our agent says /dev/sdb is not a block device. Prove what type of device file it is.”",
+  "Team lead request: “A driver needs a new option. Where do module options go so they survive a reboot, and how do you check which options the module accepts?”"
+ ], 3],
+ ["h2", "Mastery Checklist"],
+ ["bullets", [
+  "I can identify block and character device files from ls -l and explain the difference.",
+  "I can read major and minor numbers with ls -l, lsblk and /proc/devices.",
+  "I can explain why /proc and /sys are pseudo filesystems and find memory, CPU and kernel facts in /proc.",
+  "I can calculate a disk's size from /sys/block and confirm it with lsblk.",
+  "I can list PCI devices with lspci, show the tree with -t, add detail with -v to -vvv, and find drivers with -k.",
+  "I can list USB devices with lsusb, show the port tree with -t and get details with -v.",
+  "I can list loaded modules with lsmod and explain the Used by column and modules.builtin.",
+  "I can describe a module with modinfo and its -F option.",
+  "I can explain the difference between insmod, rmmod, modprobe and modprobe -r, and preview dependencies with modprobe --show-depends.",
+  "I can read and explain blacklist, install, options and alias lines in /etc/modprobe.d.",
+  "I can read kernel messages with sudo dmesg, dmesg -T and journalctl -k.",
+  "I can query udev with udevadm info, watch events with udevadm monitor, and explain coldplug, hotplug, the rules directories and D-Bus."
+ ], 4]
+]

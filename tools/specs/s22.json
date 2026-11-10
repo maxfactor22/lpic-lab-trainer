@@ -1,0 +1,419 @@
+[
+ [
+  "h1",
+  "LPIC-1 Section 22 Scenario-Based IT Engineering Lab Guide"
+ ],
+ [
+  "sub",
+  "Objective 102.3: Manage shared libraries by tracing what a program needs, reading the loader's search configuration, and fixing \"cannot open shared object file\" errors on a practice library you build yourself."
+ ],
+ [
+  "h2",
+  "How to use this workbook"
+ ],
+ [
+  "p",
+  "Treat each lab like a ticket. Programs on Linux rarely carry all their own code; they borrow it from shared libraries at run time. When a library is missing or the loader cannot find it, the program will not start at all. Your job in these labs is to find out what a program needs, where the loader looks, and how to point it at the right place, then prove the fix from the command line."
+ ],
+ [
+  "p",
+  "Use a Linux Mint VM. Reading system libraries is always safe. The only lab that changes system configuration (Lab 10) adds one small file under /etc/ld.so.conf.d and then removes it, and it rebuilds the cache both times so the system ends where it started. Never delete, move, or rename anything under /lib, /usr/lib, or /lib64; a missing libc stops almost every command on the system."
+ ],
+ [
+  "p",
+  "Several labs build a tiny practice library called libgreet so you can break and fix library loading without touching anything the system depends on. You do not need to know C. Copy the commands exactly."
+ ],
+ [
+  "h2",
+  "Lab Setup"
+ ],
+ [
+  "p",
+  "Step 1: Confirm the library tools are present. They come with every Mint install:"
+ ],
+ [
+  "p",
+  "command -v ldd ldconfig"
+ ],
+ [
+  "p",
+  "You should see two paths, such as /usr/bin/ldd and /usr/sbin/ldconfig."
+ ],
+ [
+  "p",
+  "Step 2: Install the compiler toolchain. Mint does not install it by default, and the build labs need gcc, ar, objdump, readelf, and the static C library:"
+ ],
+ [
+  "p",
+  "sudo apt install build-essential"
+ ],
+ [
+  "p",
+  "gcc --version | head -1"
+ ],
+ [
+  "p",
+  "Step 3: Create the practice workspace:"
+ ],
+ [
+  "p",
+  "mkdir -p ~/lpic1-section22/{src,lib,bin,reports}"
+ ],
+ [
+  "p",
+  "cd ~/lpic1-section22"
+ ],
+ [
+  "p",
+  "Step 4: Create the sample source files for the practice library and the program that uses it:"
+ ],
+ [
+  "p",
+  "printf '%s\\n' '#include <stdio.h>' 'void greet(const char *host) { printf(\"libgreet says hello to %s\\n\", host); }' > src/greet.c"
+ ],
+ [
+  "p",
+  "printf '%s\\n' 'void greet(const char *host);' 'int main(void) { greet(\"web01\"); return 0; }' > src/app.c"
+ ],
+ [
+  "p",
+  "Validation check: Run ls -R and cat src/greet.c src/app.c. You should see two short C files and empty lib, bin, and reports folders. To reset at any point, run rm -f lib/* bin/* src/*.o and then repeat Step 4."
+ ],
+ [
+  "h2",
+  "Commands to Memorize"
+ ],
+ [
+  "p",
+  "ldd, ldd on an absolute path from which, ldconfig, ldconfig -p, ldconfig -v, ldconfig -N, ldconfig -X, ldconfig -n, /etc/ld.so.conf, the include line, /etc/ld.so.conf.d/*.conf, /etc/ld.so.cache, LD_LIBRARY_PATH, export LD_LIBRARY_PATH, unset, /lib, /lib64, /usr/lib, /usr/lib/x86_64-linux-gnu, /lib64/ld-linux-x86-64.so.2 (the dynamic linker/loader, ld.so), objdump -p, readelf -d, file, ar, gcc -shared, gcc -static, and the name forms lib<name>.so.<version>, lib<name>.so, and lib<name>.a."
+ ],
+ [
+  "h2",
+  "Memory hook"
+ ],
+ [
+  "p",
+  "Think of a library as having three names and the loader as having three places to look. Names: the real name carries the full version (libz.so.1.2.13), the soname carries the major version that programs ask for (libz.so.1), and the linker name has no version (libz.so) and is only used when compiling. Places: first anything in LD_LIBRARY_PATH, then the cache in /etc/ld.so.cache, then the trusted defaults /lib and /usr/lib. ldconfig builds the cache from /etc/ld.so.conf and its include directory, ldconfig -p reads it, and ldd shows the result for one program."
+ ],
+ [
+  "h2",
+  "Beginner Labs: What a Program Needs and Where Libraries Live"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 1: List the libraries a monitoring command depends on",
+   "scenario": "A monitoring agent on app02 shells out to ps. The vendor asks for a list of every shared library ps loads so they can check it against a known-good build.",
+   "task": "Find the absolute path of ps and list its shared libraries with their resolved locations.",
+   "deliverable": "reports/ps-libs.txt containing the path of ps and the ldd output.",
+   "steps": [
+    "which ps > reports/ps-libs.txt",
+    "ldd $(which ps) >> reports/ps-libs.txt",
+    "Read each line. The left side is the name the program asks for, the right side after => is the file the loader picked, and the hex number is the load address, which changes every run."
+   ],
+   "validation": "cat reports/ps-libs.txt and confirm every line has a path after => and none says not found.",
+   "trap": "ldd needs a path, not just a command name. ldd ps fails with \"not a dynamic executable\" or \"No such file\" unless ps is in the current directory. Also, linux-vdso.so.1 has no file on disk; the kernel provides it, so do not go looking for it. Never run ldd on a binary you do not trust: on some versions it can execute the program. objdump -p file | grep NEEDED is the safe way to read the list."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 2: Decode library file names for a change review",
+   "scenario": "A change request says \"upgrade zlib from 1.2 to 1.3, no application changes needed.\" The reviewer wants to know why the applications will not need relinking.",
+   "task": "Show the real file, the soname symlink, and the soname stored inside the library, and explain how they relate.",
+   "deliverable": "reports/zlib-names.txt with the listing, the resolved file, the embedded soname, and a two-line explanation.",
+   "steps": [
+    "ls -l /lib/x86_64-linux-gnu/libz.so* > reports/zlib-names.txt",
+    "readlink -f /lib/x86_64-linux-gnu/libz.so.1 >> reports/zlib-names.txt",
+    "objdump -p /lib/x86_64-linux-gnu/libz.so.1 | grep SONAME >> reports/zlib-names.txt",
+    "ls /lib/x86_64-linux-gnu | grep -E '^lib(c|stdc\\+\\+|pcre2-8)\\.so' >> reports/zlib-names.txt",
+    "Add your explanation with nano reports/zlib-names.txt: programs record the soname libz.so.1, and the symlink of that name points at whichever real file (libz.so.1.2.x or libz.so.1.3.x) is installed. Note the naming variants in the last listing, such as libc.so.6 with no minor version and libpcre2-8 with a number inside the name."
+   ],
+   "validation": "grep SONAME reports/zlib-names.txt and confirm it shows libz.so.1.",
+   "trap": "The linker name libz.so (no version) only exists if the development package (zlib1g-dev) is installed, because only compilers use it. A running program never asks for libz.so; it asks for the soname. A major version change (libz.so.2) would break that link, which is why major versions can be installed side by side."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 3: Map every place the loader will search",
+   "scenario": "A developer insists their library is \"installed\" because it is in /opt/vendor/lib, but their program still cannot find it. You need to show them where the loader actually looks.",
+   "task": "Record the LD_LIBRARY_PATH value, the main configuration file and everything it includes, and the default library directories.",
+   "deliverable": "reports/search-map.txt.",
+   "steps": [
+    "echo \"LD_LIBRARY_PATH=[$LD_LIBRARY_PATH]\" > reports/search-map.txt",
+    "cat /etc/ld.so.conf >> reports/search-map.txt",
+    "ls /etc/ld.so.conf.d/ >> reports/search-map.txt",
+    "cat /etc/ld.so.conf.d/*.conf >> reports/search-map.txt",
+    "ls -ld /lib /lib64 /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu >> reports/search-map.txt 2>&1",
+    "Run ls /usr/lib/x86_64-linux-gnu | head -20 to see how libraries are grouped, including subdirectories that belong to particular applications."
+   ],
+   "validation": "grep include reports/search-map.txt and confirm the main file includes /etc/ld.so.conf.d/*.conf. The first line should show empty brackets, which is normal.",
+   "trap": "/opt/vendor/lib is not searched unless a file in /etc/ld.so.conf.d names it (and ldconfig has been run) or LD_LIBRARY_PATH contains it. On Mint, /lib is a symlink to /usr/lib (the merged /usr layout), so both paths show the same files. PATH is for finding commands, not libraries; adding a library folder to PATH does nothing for the loader. Some ls -ld lines may report a missing directory; that is fine, it just means that location is unused on your release."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 4: Identify the dynamic linker/loader",
+   "scenario": "During an incident, a teammate says \"the loader\" is the problem but nobody can say which program that is. You are asked to find it and show that it can launch a program directly.",
+   "task": "Find the loader that ps requests, confirm what kind of file it is, and use it to list and run ps.",
+   "deliverable": "reports/loader.txt.",
+   "steps": [
+    "readelf -l /usr/bin/ps | grep -i interpreter > reports/loader.txt",
+    "ls -l /lib64/ld-linux-x86-64.so.2 >> reports/loader.txt",
+    "file -L /lib64/ld-linux-x86-64.so.2 >> reports/loader.txt",
+    "/lib64/ld-linux-x86-64.so.2 --list /usr/bin/ps >> reports/loader.txt",
+    "/lib64/ld-linux-x86-64.so.2 /usr/bin/ps -p $$ >> reports/loader.txt",
+    "Run file $(which ldd) >> reports/loader.txt, then man ld.so to read the search order in its own words."
+   ],
+   "validation": "cat reports/loader.txt and confirm the interpreter line names /lib64/ld-linux-x86-64.so.2, the --list output matches Lab 1, and ps printed your shell's process.",
+   "trap": "ldd is only a shell script that asks the loader to list dependencies, which is why --list gives the same output. The loader itself is named ld-linux-x86-64.so.2 on 64-bit x86 and is documented as ld.so; do not confuse it with ld, the compile-time linker from binutils."
+  }
+ ],
+ [
+  "h2",
+  "Intermediate Labs: The Library Cache and a Broken Program"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 5: Query the library cache",
+   "scenario": "A package install hook failed halfway on db01. Before you rebuild anything, the lead asks what the cache currently knows about.",
+   "task": "Show the cache file, count its entries, view it verbosely without changing it, and search it for one library.",
+   "deliverable": "reports/cache-check.txt.",
+   "steps": [
+    "ls -l /etc/ld.so.cache > reports/cache-check.txt",
+    "file /etc/ld.so.cache >> reports/cache-check.txt",
+    "ldconfig -p | head -1 >> reports/cache-check.txt",
+    "ldconfig -p | grep 'libz.so.1 ' >> reports/cache-check.txt",
+    "Run ldconfig -v -N -X 2>/dev/null | less to browse each directory ldconfig scans and the libraries it finds there. -N means do not rebuild the cache and -X means do not touch symlinks, so this is read-only. Press q to leave less."
+   ],
+   "validation": "cat reports/cache-check.txt and confirm the third line reads like \"NNNN libs found in cache\" and the libz line shows a path.",
+   "trap": "ldconfig -p reports the cache, not the disk. A library copied into a directory a minute ago does not appear until ldconfig runs again, and a deleted one can still be listed. The cache is binary; never edit it, rebuild it with sudo ldconfig. Package managers run ldconfig for you after installs, which is why you rarely have to."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 6: Work a \"top will not start\" ticket",
+   "scenario": "A ticket from web01 says top fails to start after someone was \"cleaning up old libraries.\" Your copy of top works, so you will rehearse the triage steps on it.",
+   "task": "Find top's libraries, pick its process-information library, and confirm that library is both in the cache and on disk.",
+   "deliverable": "reports/top-triage.txt with the three checks.",
+   "steps": [
+    "ldd $(which top) > reports/top-triage.txt",
+    "Run ldd $(which top) | grep libproc to spot the process-information library: libprocps.so.8 on Mint 21, libproc2.so.0 on Mint 22.",
+    "ldconfig -p | grep -E 'libproc(ps|2)\\.so' >> reports/top-triage.txt",
+    "ls -l $(ldd $(which top) | awk '/libproc/ {print $3}') >> reports/top-triage.txt"
+   ],
+   "validation": "cat reports/top-triage.txt and confirm the library appears three times: in the ldd output, in the cache, and in the ls -l listing.",
+   "trap": "Work the checks in order. ldd \"not found\" plus a cache hit means the cache is stale or the file was deleted; a cache miss plus a file on disk means the directory is not configured or ldconfig was not run. On a real system the fix for a deleted library is to reinstall its package (dpkg -S finds the owner), not to copy a .so from another machine."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 7: Build a shared library with proper names",
+   "scenario": "The app team wants a small in-house library, libgreet, packaged the standard way so future versions can be swapped in without relinking.",
+   "task": "Compile position-independent code, build libgreet.so.1.0.0 with an embedded soname of libgreet.so.1, and create the soname and linker-name symlinks.",
+   "deliverable": "lib/ containing the real file and two symlinks, and reports/greet-names.txt.",
+   "steps": [
+    "gcc -fPIC -c src/greet.c -o src/greet.o",
+    "gcc -shared -Wl,-soname,libgreet.so.1 -o lib/libgreet.so.1.0.0 src/greet.o",
+    "ldconfig -n lib",
+    "That last command reads the soname inside the file and creates the symlink lib/libgreet.so.1. It needs no sudo because -n only touches the folder you name and leaves the system cache alone.",
+    "ln -sf libgreet.so.1 lib/libgreet.so",
+    "ls -l lib > reports/greet-names.txt",
+    "objdump -p lib/libgreet.so.1.0.0 | grep SONAME >> reports/greet-names.txt"
+   ],
+   "validation": "cat reports/greet-names.txt and confirm libgreet.so -> libgreet.so.1 -> libgreet.so.1.0.0 and SONAME libgreet.so.1.",
+   "trap": "ldconfig makes soname links, never linker-name links. If you skip the ln -sf step, gcc -lgreet in the next lab fails with \"cannot find -lgreet\", which is a compile-time error, not a loader error."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 8: Reproduce \"cannot open shared object file\"",
+   "scenario": "app02 reports: error while loading shared libraries: libgreet.so.1: cannot open shared object file: No such file or directory. You need to reproduce it in the lab before you fix it.",
+   "task": "Link the program against libgreet, run it, and capture the failure and the ldd evidence.",
+   "deliverable": "reports/greet-failure.txt.",
+   "steps": [
+    "gcc src/app.c -Llib -lgreet -o bin/greetapp",
+    "./bin/greetapp 2> reports/greet-failure.txt",
+    "ldd bin/greetapp >> reports/greet-failure.txt",
+    "objdump -p bin/greetapp | grep NEEDED >> reports/greet-failure.txt"
+   ],
+   "validation": "grep -c 'not found' reports/greet-failure.txt returns 1, and the NEEDED lines include libgreet.so.1.",
+   "trap": "-L only tells the compile-time linker where to look. It is not saved in the program, so the loader has no idea lib/ exists. The program asks for libgreet.so.1 (the soname), not libgreet.so or the full real name."
+  }
+ ],
+ [
+  "h2",
+  "Advanced Labs: Fixing, Linking Statically, and Auditing"
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 9: Fix it for one session with LD_LIBRARY_PATH",
+   "scenario": "The developer needs greetapp running right now for a demo, without changing any system files.",
+   "task": "Run the program once with LD_LIBRARY_PATH set for that command only, then export it for the session while keeping any existing value, then remove it.",
+   "deliverable": "reports/ldpath-fix.txt.",
+   "steps": [
+    "LD_LIBRARY_PATH=$PWD/lib ./bin/greetapp > reports/ldpath-fix.txt",
+    "export LD_LIBRARY_PATH=$PWD/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}",
+    "echo \"$LD_LIBRARY_PATH\" >> reports/ldpath-fix.txt",
+    "ldd bin/greetapp | grep greet >> reports/ldpath-fix.txt",
+    "unset LD_LIBRARY_PATH",
+    "./bin/greetapp 2>> reports/ldpath-fix.txt",
+    "The last run fails again, which proves the fix only lasted while the variable was set."
+   ],
+   "validation": "cat reports/ldpath-fix.txt and confirm the hello line, a libgreet line with a path into your lib folder, and a final error line.",
+   "trap": "Writing export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/dir when the variable is empty leaves a leading colon, and an empty entry means the current directory, which is a security risk. The ${VAR:+:$VAR} form only adds the colon when there is something to add. Use LD_LIBRARY_PATH for testing and development, not as a permanent fix; put that in a script if you need it often."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 10: Fix it permanently with ld.so.conf.d and ldconfig",
+   "scenario": "The demo went well. The team wants greetapp to work for every user and every shell on the test box, the way vendor libraries are normally registered.",
+   "task": "Add a configuration file for the lib folder, rebuild the cache, prove the program runs, then remove the file and rebuild again so your VM is back to normal.",
+   "deliverable": "reports/ldconf-fix.txt.",
+   "steps": [
+    "echo \"$HOME/lpic1-section22/lib\" | sudo tee /etc/ld.so.conf.d/lpic1-greet.conf",
+    "sudo ldconfig",
+    "ldconfig -p | grep libgreet > reports/ldconf-fix.txt",
+    "./bin/greetapp >> reports/ldconf-fix.txt",
+    "Cleanup: sudo rm /etc/ld.so.conf.d/lpic1-greet.conf",
+    "sudo ldconfig",
+    "ldconfig -p | grep -c libgreet >> reports/ldconf-fix.txt"
+   ],
+   "validation": "cat reports/ldconf-fix.txt and confirm a cache line for libgreet.so.1, the hello line, and a final count of 0. ls /etc/ld.so.conf.d should no longer list lpic1-greet.conf.",
+   "trap": "Adding the .conf file does nothing by itself; the change only takes effect when sudo ldconfig rebuilds /etc/ld.so.cache. Running plain ldconfig without sudo fails because the cache file belongs to root. You could also add the path directly to /etc/ld.so.conf, but a separate file in ld.so.conf.d is cleaner and easy to remove."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 11: Compare static and dynamic linking",
+   "scenario": "A field engineer needs a copy of greetapp that runs on a rescue system where the library will not be installed. You are asked to compare the options.",
+   "task": "Build a fully static copy, a copy linked against a static libgreet.a, and compare them with the dynamic build.",
+   "deliverable": "reports/static-vs-dynamic.txt.",
+   "steps": [
+    "ar rcs lib/libgreet.a src/greet.o",
+    "gcc src/app.c lib/libgreet.a -o bin/greetapp-archive",
+    "gcc -static src/app.c src/greet.c -o bin/greetapp-static",
+    "ls -l bin/ > reports/static-vs-dynamic.txt",
+    "file bin/* >> reports/static-vs-dynamic.txt",
+    "ldd bin/greetapp-archive >> reports/static-vs-dynamic.txt",
+    "ldd bin/greetapp-static >> reports/static-vs-dynamic.txt 2>&1",
+    "Run ./bin/greetapp-archive and ./bin/greetapp-static; both should run with no LD_LIBRARY_PATH set."
+   ],
+   "validation": "grep -E 'statically linked|not a dynamic executable' reports/static-vs-dynamic.txt and compare the file sizes: the static build is hundreds of times larger.",
+   "trap": "Static programs carry a frozen copy of every library, so a security fix to libc does not reach them until they are rebuilt; dynamic programs pick up the fix the next time they start. Static libraries end in .a (an ar archive) and shared ones in .so. When both exist in the same folder, gcc -lgreet picks the .so."
+  }
+ ],
+ [
+  "lab",
+  {
+   "title": "Lab 12: Audit direct and indirect dependencies of a running program",
+   "scenario": "Security asks whether your current shell has the patched libc loaded, and whether ssh depends on OpenSSL directly or only through another library.",
+   "task": "Compare the direct NEEDED list for ssh with ldd's full tree, and show which libc file your running shell has mapped.",
+   "deliverable": "reports/dep-audit.txt.",
+   "steps": [
+    "objdump -p /usr/bin/ssh | grep NEEDED > reports/dep-audit.txt",
+    "ldd /usr/bin/ssh | wc -l >> reports/dep-audit.txt",
+    "grep -m1 'libc.so' /proc/$$/maps >> reports/dep-audit.txt",
+    "Compare: NEEDED lists only what ssh asks for itself; ldd follows the chain, so it lists libraries that the first libraries need too."
+   ],
+   "validation": "cat reports/dep-audit.txt and confirm there are fewer NEEDED lines than ldd lines, and that the maps line shows a path ending in libc.so.6.",
+   "trap": "A library update on disk does not change programs that are already running; they keep the old copy mapped until restarted. After a libc update, services need a restart (or the system a reboot), and /proc/PID/maps shows (deleted) next to libraries that were replaced underneath a running process."
+  }
+ ],
+ [
+  "h2",
+  "Common Exam Traps"
+ ],
+ [
+  "bullets",
+  [
+   "Running ldd with a bare command name. ldd needs a path; use ldd $(which ps).",
+   "Thinking ldconfig -p reads the disk. It prints the contents of /etc/ld.so.cache, which can be out of date until ldconfig runs again.",
+   "Forgetting that adding a file to /etc/ld.so.conf.d changes nothing until you run ldconfig as root.",
+   "Mixing up the files. /etc/ld.so.conf is text you edit, it includes /etc/ld.so.conf.d/*.conf, and /etc/ld.so.cache is the binary result you never edit.",
+   "Believing PATH helps find libraries. PATH finds commands; the loader uses LD_LIBRARY_PATH, the cache, and the default directories.",
+   "Getting the search order wrong. LD_LIBRARY_PATH comes before the cache, and the trusted directories /lib and /usr/lib (lib64 on some systems) come last. A path embedded at build time (RPATH or RUNPATH) can also be involved.",
+   "Expecting LD_LIBRARY_PATH to survive a new login. It lasts for the shell where it was exported, and only children of that shell see it.",
+   "Leaving a leading or trailing colon in LD_LIBRARY_PATH, which adds the current directory to the search.",
+   "Confusing the three names: real name libz.so.1.2.13, soname libz.so.1 (what programs request), linker name libz.so (what gcc -lz uses).",
+   "Confusing ld and ld.so. ld is the build-time linker; ld.so (ld-linux-x86-64.so.2 on 64-bit x86) is the run-time dynamic linker/loader.",
+   "Mixing up ldconfig options: -p prints the cache, -v is verbose, -N skips rebuilding the cache, -X skips links, -n processes only the directories named on the command line.",
+   "Thinking a static program needs its libraries at run time. It contains them, so ldd reports \"not a dynamic executable\".",
+   "Fixing a missing library by copying a .so from another server. Reinstall the owning package instead.",
+   "Forgetting that ldd on an untrusted binary can be unsafe. objdump -p or readelf -d shows the NEEDED entries without running anything."
+  ]
+ ],
+ [
+  "h2",
+  "Scenario-Based Challenge Exam"
+ ],
+ [
+  "p",
+  "Complete these tasks without notes, using only your Linux Mint VM and ~/lpic1-section22. Start by resetting the workspace: rm -f lib/* bin/* src/*.o, then rerun Step 4 of the Lab Setup."
+ ],
+ [
+  "numbered",
+  [
+   "Save the full list of shared libraries used by the ls command to reports/challenge-ls.txt, with resolved paths.",
+   "Show which file the soname libc.so.6 resolves to and save the answer to reports/challenge-libc.txt.",
+   "Prove from the configuration files, not from memory, which directories the cache is built from.",
+   "Rebuild libgreet as a properly named shared library with the soname libgreet.so.1 and all symlinks.",
+   "Build greetapp and capture the loader error it gives before any fix.",
+   "Make greetapp run in your shell only, without touching /etc, then undo it.",
+   "Register the library for the whole system, prove it is in the cache, run the program, and then remove the registration and prove it is gone.",
+   "Build a copy of greetapp that runs with no external libgreet at all, and prove it with ldd."
+  ]
+ ],
+ [
+  "p",
+  "Your final handoff is the reports directory. For each file, write one sentence that says which part of the loader's search order it proves."
+ ],
+ [
+  "h2",
+  "LPIC-Style Practical Questions"
+ ],
+ [
+  "bullets",
+  [
+   "Vendor request: “Send me every shared library our monitoring agent loads, with the path each one comes from.”",
+   "Developer request: “My library is in /opt/vendor/lib but the program still says it cannot open it. Make it work for everyone on this server.”",
+   "Incident bridge request: “We need the app up in the next five minutes. Get it to find its library without changing anything under /etc.”",
+   "Change reviewer request: “Explain why upgrading zlib from 1.2 to 1.3 will not require relinking our applications.”",
+   "Help desk request: “top stopped working after someone cleaned up libraries. Is the library missing, or does the system just not know where it is?”",
+   "Field engineer request: “I need a build of this tool that runs on a rescue disk with nothing else installed.”",
+   "Security request: “We just patched libc. Which running processes are still using the old copy, and why?”"
+  ],
+  3
+ ],
+ [
+  "h2",
+  "Mastery Checklist"
+ ],
+ [
+  "bullets",
+  [
+   "I can explain what a shared library is and why many programs share one copy.",
+   "I can read a library file name and point out its real name, soname, and linker name.",
+   "I can list a program's libraries with ldd and an absolute path, and read the => and not found lines.",
+   "I can name the dynamic linker/loader and use it to list or run a program.",
+   "I can show the contents of /etc/ld.so.conf and the files it includes from /etc/ld.so.conf.d.",
+   "I can explain what /etc/ld.so.cache is and why it must be rebuilt with ldconfig.",
+   "I can search the cache with ldconfig -p | grep and browse it with ldconfig -v.",
+   "I can state the order the loader searches: LD_LIBRARY_PATH, the cache, then the default directories.",
+   "I can set LD_LIBRARY_PATH for one command or export it for a session without breaking an existing value.",
+   "I can register a new library directory for the whole system and remove it cleanly.",
+   "I can explain static versus dynamic linking and recognize .a and .so files.",
+   "I can troubleshoot a \"cannot open shared object file\" error step by step."
+  ],
+  4
+ ]
+]
