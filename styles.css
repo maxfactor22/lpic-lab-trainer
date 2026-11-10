@@ -928,3 +928,27 @@ label.button { cursor: pointer; }
 .follow-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--warn-soft); border-top: 1px solid var(--warn-line); color: #e9dfc8; font-size: .8rem; }
 .follow-bar[hidden] { display: none; }
 .follow-bar .ctrl-c { flex: none; min-height: 32px; padding: 4px 12px; border-radius: 7px; border: 1px solid var(--warn-line); background: rgba(241, 200, 120, .14); color: var(--warn); font: 700 .82rem/1 var(--mono); cursor: pointer; }
+
+/* vi and nano editors (Section 9) */
+.editor { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--term-bg); color: var(--term-text); font: .82rem/1.45 var(--mono); }
+.vi-screen { flex: 1; overflow: hidden; padding: 8px 12px 0; cursor: text; }
+.vi-line { white-space: pre; min-height: 1.45em; overflow: hidden; text-overflow: clip; }
+.vi-line.tilde { color: #5a6aa8; }
+.vi-num { color: #f1c878; }
+.vi-cursor { background: var(--term-text); color: var(--term-bg); }
+.vi-cursor.ins { background: transparent; color: inherit; box-shadow: inset 2px 0 0 var(--term-prompt); }
+.vi-status { display: flex; justify-content: space-between; gap: 12px; padding: 4px 12px 6px; white-space: pre; overflow: hidden; }
+.vi-err { color: #fff; background: #b3261e; padding: 0 4px; }
+.vi-input { position: absolute; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
+.vi-keys, .nano-keys { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 10px; background: var(--term-bar); border-top: 1px solid #1a2340; }
+.vi-keys button, .nano-keys button { min-height: 34px; min-width: 38px; padding: 4px 9px; border-radius: 7px; border: 1px solid #2a3558; background: #141c33; color: var(--term-text); font: 600 .8rem/1 var(--mono); cursor: pointer; }
+.vi-keys button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.nano-head { display: flex; justify-content: space-between; gap: 12px; padding: 4px 12px; background: #e8ebf5; color: #0b1020; font-weight: 600; }
+.nano-area { flex: 1; resize: none; border: 0; outline: none; padding: 8px 12px; background: transparent; color: inherit; font: inherit; }
+.nano-msg { min-height: 1.45em; text-align: center; color: #0b1020; }
+.nano-msg:not(:empty) { background: #e8ebf5; margin: 0 auto 2px; padding: 0 8px; }
+.nano-prompt { display: flex; gap: 6px; padding: 2px 12px; background: #e8ebf5; color: #0b1020; }
+.nano-prompt[hidden] { display: none; }
+.nano-prompt input { flex: 1; border: 0; outline: none; background: transparent; font: inherit; color: inherit; }
+.nano-keys b { color: var(--term-prompt); }
+@media (max-width: 600px) { .editor { font-size: .74rem; } }

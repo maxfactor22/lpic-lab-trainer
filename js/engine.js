@@ -460,6 +460,14 @@
       updatePrompt();
       grade({ res, shell });
       if (res.pager) openPager(res.pager);
+      if (res.editor) {
+        input.disabled = true;
+        LPIC.openEditor({
+          kind: res.editor.kind, path: res.editor.path, shell, panel: $(".terminal-panel"),
+          onEvent: (ev) => grade({ res: { events: [ev], out: [] }, shell }),
+          onClose: (lines) => { lines.forEach((l) => line(l.text, l.cls)); input.disabled = false; updatePrompt(); input.focus(); },
+        });
+      }
       if (res.follow) {
         follow = { ...res.follow, seen: fileText(res.follow.path) };
         $("#terminal-panel-follow").hidden = false;
