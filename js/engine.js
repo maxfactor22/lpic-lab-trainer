@@ -313,8 +313,10 @@
         </form>
         <div class="follow-bar" id="terminal-panel-follow" hidden><span>tail -f is following the file. New lines appear as they're written.</span>
           <button type="button" data-key="ctrl-c" class="ctrl-c">Ctrl+C</button></div>
+        <div class="key-row mux-row" id="mux-row" aria-label="tmux and screen keys" hidden></div>
         <div class="key-row" aria-label="Terminal keys">
           <button type="button" data-key="ctrl-c" aria-label="Control C">^C</button>
+          <button type="button" data-key="ctrl-z" aria-label="Control Z">^Z</button>
           <button type="button" data-key="up" aria-label="Previous command">↑</button>
           <button type="button" data-key="down" aria-label="Next command">↓</button>
           <button type="button" data-key="!" >!</button>
@@ -392,11 +394,48 @@
     const out = $("#terminal-output"), input = $("#terminal-input");
     let recall = null;
 
+    const busy = () => !!(shell.busy && shell.busy());
     const updatePrompt = () => {
-      $("#terminal-prompt").textContent = shell.prompt();
-      $("#terminal-title").textContent = shell.prompt().replace(/\$$/, "");
+      $("#terminal-prompt").textContent = busy() ? "" : shell.prompt();
+      $("#terminal-title").textContent = shell.title ? shell.title() : shell.prompt().replace(/\$$/, "");
     };
     const line = (text, cls) => { const p = document.createElement("p"); if (cls) p.className = cls; p.textContent = text; out.append(p); out.scrollTop = out.scrollHeight; };
+
+    /* Job control and multiplexers (Section 11): a result from a key (Ctrl+C, Ctrl+Z, the
+       tmux/screen prefix) or from the once-a-second check that a foreground job has ended. */
+    const handle = (r) => {
+      if (!r) return;
+      (r.out || []).forEach((o) => line(o.text, o.cls));
+      updatePrompt();
+      grade({ res: r, shell });
+      renderMux();
+      if (r.screen) openApp(r.screen.app);
+    };
+    const openApp = (app) => {
+      input.disabled = true;
+      LPIC.openScreenApp({
+        app, shell, panel: $(".terminal-panel"),
+        onEvent: (ev) => grade({ res: { events: [ev], out: [] }, shell }),
+        onClose: (r) => { input.disabled = false; handle(r); input.focus(); },
+      });
+    };
+    const renderMux = () => {
+      const row = $("#mux-row");
+      if (!row) return;
+      const keys = shell.muxButtons ? shell.muxButtons() : [];
+      row.hidden = !keys.length;
+      row.innerHTML = keys.map(([label, key]) => `<button type="button" data-mux="${esc(key)}">${esc(label)}</button>`).join("");
+      row.querySelectorAll("button").forEach((b) => {
+        b.addEventListener("mousedown", (e) => e.preventDefault());
+        b.addEventListener("click", () => { handle(shell.sendKey(b.dataset.mux)); input.focus(); });
+      });
+    };
+    const pollTimer = setInterval(() => {
+      if (!document.contains(input) || current.shell !== shell) { clearInterval(pollTimer); return; }
+      if (input.disabled || !shell.poll) return;
+      const r = shell.poll();
+      if (r) handle(r);
+    }, 1000);
 
     /* tail -f: while following, the input acts as a second terminal, and new lines
        written to the followed file stream into the output until Ctrl+C. */
@@ -427,6 +466,12 @@
           updatePrompt();
           return runFull(full, true);
         }
+        return;
+      }
+      if (busy() && !follow) { // a foreground job is running: typing goes to it
+        line(raw);
+        const hint = shell.busyHint && shell.busyHint();
+        if (hint) line(hint, "terminal-muted");
         return;
       }
       if (!raw.trim()) return;
@@ -468,6 +513,8 @@
           onClose: (lines) => { lines.forEach((l) => line(l.text, l.cls)); input.disabled = false; updatePrompt(); input.focus(); },
         });
       }
+      renderMux();
+      if (res.screen) openApp(res.screen.app);
       if (res.follow) {
         follow = { ...res.follow, seen: fileText(res.follow.path) };
         $("#terminal-panel-follow").hidden = false;
@@ -492,6 +539,16 @@
       input.setSelectionRange(input.value.length, input.value.length);
     };
     input.addEventListener("keydown", (e) => {
+      if (shell.sendKey && !follow && !heredoc) {
+        // The key after a tmux/screen prefix (or a y/n answer) goes straight to the shell.
+        if (shell.awaitingKey() && !e.ctrlKey && !e.metaKey && (e.key.length === 1 || /^(Arrow|Tab)/.test(e.key))) { e.preventDefault(); handle(shell.sendKey(e.key)); return; }
+        if (e.ctrlKey && /^[zcab]$/i.test(e.key)) {
+          const k = "Ctrl+" + e.key.toLowerCase();
+          const r = shell.sendKey(k);
+          if (r) { e.preventDefault(); handle(r); return; }
+          if (k === "Ctrl+c" && input.selectionStart === input.selectionEnd) { e.preventDefault(); line(`${shell.prompt()} ${input.value}^C`, "terminal-command"); input.value = ""; return; }
+        }
+      }
       if (e.key === "ArrowUp") { e.preventDefault(); recallMove(-1); }
       if (e.key === "ArrowDown") { e.preventDefault(); recallMove(1); }
       if (e.key === "l" && e.ctrlKey) { e.preventDefault(); out.replaceChildren(); }
@@ -501,6 +558,11 @@
     $$(".key-row button").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
     $$(".key-row button").forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.key;
+      if ((k === "ctrl-c" || k === "ctrl-z") && !heredoc && !follow && shell.sendKey) {
+        const r = shell.sendKey(k === "ctrl-c" ? "Ctrl+c" : "Ctrl+z");
+        if (r) { handle(r); input.focus(); return; }
+        if (k === "ctrl-z") return;
+      }
       if (k === "ctrl-c") { if (heredoc) { heredoc = null; line("^C", "terminal-command"); updatePrompt(); return; } return stopFollow(); }
       if (k === "up") return recallMove(-1);
       if (k === "down") return recallMove(1);
@@ -515,9 +577,14 @@
       const ex = b.getAttribute("aria-expanded") === "true";
       b.setAttribute("aria-expanded", String(!ex)); b.nextElementSibling.hidden = ex;
     }));
+    // On a phone, the key after a prefix arrives as typed text.
+    input.addEventListener("input", () => {
+      if (shell.awaitingKey && shell.awaitingKey() && input.value) { const ch = input.value.slice(-1); input.value = ""; handle(shell.sendKey(ch)); }
+    });
     bindPager();
     bindChallenge(lesson);
     updatePrompt();
+    renderMux();
   }
 
   /* Grade every unfinished task against the latest command or pager event. */

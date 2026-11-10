@@ -118,6 +118,7 @@
       if (a.startsWith("-d")) { delims = a.slice(2); continue; }
       if (a === "-s") { serial = true; continue; }
       if (a === "-sd") { serial = true; delims = args[++i]; continue; }
+      if (/^-sd./.test(a)) { serial = true; delims = a.slice(3); continue; } // -sd, joins with commas
       files.push(a);
     }
     delims = delims.replace(/\\t/g, "\t").replace(/\\n/g, "\n") || "\t";

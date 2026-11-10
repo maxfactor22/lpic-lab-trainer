@@ -952,3 +952,18 @@ label.button { cursor: pointer; }
 .nano-prompt input { flex: 1; border: 0; outline: none; background: transparent; font: inherit; color: inherit; }
 .nano-keys b { color: var(--term-prompt); }
 @media (max-width: 600px) { .editor { font-size: .74rem; } }
+
+/* top, watch, tmux and screen (Section 11) */
+.screenapp .vi-screen { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+.screenapp .vi-line { min-height: 1.45em; overflow: visible; width: max-content; min-width: 100%; }
+@media (max-width: 600px) { .screenapp { font-size: .68rem; } }
+.sa-hdr { background: var(--term-text); color: var(--term-bg); display: inline-block; min-width: 100%; }
+.sa-hl { background: #f1c878; color: #0b1020; }
+.sa-prompt { color: var(--term-prompt); }
+.sa-split { display: flex; justify-content: space-between; gap: 16px; }
+.watch-diff { background: var(--term-text); color: var(--term-bg); }
+.sa-note { margin: 0; padding: 6px 12px; border-top: 1px solid #1a2340; color: #9aa6c8; font: .74rem/1.3 var(--mono); white-space: pre; overflow-x: auto; }
+.sa-note[hidden] { display: none; }
+.mux-row { flex-wrap: wrap; background: #0d1426; border-top: 1px solid var(--accent-line); }
+.mux-row[hidden] { display: none; }
+.mux-row button { border-color: var(--accent-line); color: var(--accent); }

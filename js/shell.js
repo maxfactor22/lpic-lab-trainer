@@ -318,10 +318,48 @@
       try { lists = this.splitLists(line); }
       catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return res; }
 
-      for (const item of lists) {
+      this.runItems(lists, res);
+      if (this.afterRun) this.afterRun(res);
+      return res;
+    }
+
+    /* Run split list items in order. Groups "for NAME in WORDS; do ...; done" into a loop,
+       and hands "cmd &" items to runBackground when job control is loaded. */
+    runItems(lists, res) {
+      for (let n = 0; n < lists.length; n++) {
+        const item = lists[n];
         if (!item.text.trim()) continue;
         if (item.op === "&&" && this.lastStatus !== 0) continue;
         if (item.op === "||" && this.lastStatus === 0) continue;
+        const fm = item.text.trim().match(/^for\s+([A-Za-z_]\w*)(?:\s+in\s+([\s\S]*))?$/);
+        if (fm) {
+          // Collect items up to the matching "done"; nested loops count do/done pairs.
+          let depth = 0, end = -1;
+          const body = [];
+          for (let k = n + 1; k < lists.length; k++) {
+            const t = lists[k].text.trim();
+            if (/^for\s/.test(t) || /^while\s/.test(t)) depth++;
+            if (t === "done" || /^done\b/.test(t)) { if (depth === 0) { end = k; break; } depth--; }
+            body.push(k === n + 1 ? { ...lists[k], text: lists[k].text.replace(/^\s*do\b\s*/, "") } : lists[k]);
+          }
+          if (end < 0 || !/^\s*do\b/.test(lists[n + 1]?.text || "")) { res.out.push({ text: "bash: syntax error: unexpected end of file", cls: "terminal-error" }); this.lastStatus = 2; return; }
+          let words = [];
+          try {
+            words = fm[2] === undefined ? [] : this.tokenize(fm[2]).filter((t) => !t.op).flatMap((t) => {
+              let list = t.brace && !t.quoted ? this.expandBraces(t.word) : [t.word];
+              if (t.glob) list = list.flatMap((w) => { const g = this.expandGlob(w); return g.length ? g : [w]; });
+              return t.quoted ? list : list.flatMap((w) => w.split(/\s+/).filter(Boolean));
+            });
+          } catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return; }
+          for (const w of words) {
+            this.env[fm[1]] = w;
+            this.runItems(body.map((b, idx) => (idx === 0 ? { ...b, op: null } : b)), res);
+            if (res.pager || res.clear || res.exit || res.foreground) break;
+          }
+          n = end;
+          continue;
+        }
+        if (item.bg && this.runBackground) { this.runBackground(item.text.trim(), res); continue; }
         // ( commands ) run in a subshell: cd, variables and umask changes don't leak out.
         const sub = item.text.trim().match(/^\(([\s\S]*)\)$/);
         if (sub && this.runSubshell) {
@@ -332,13 +370,12 @@
         }
         let tokens;
         try { tokens = this.tokenize(item.text); }
-        catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return res; }
+        catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return; }
         if (!tokens.length) continue;
         const r = this.runPipeline(tokens, res);
         if (r.stdout) res.out.push(...r.stdout.replace(/\n$/, "").split("\n").map((text) => ({ text })));
-        if (res.pager || res.clear || res.exit) break;
+        if (res.pager || res.clear || res.exit || res.foreground || res.screen) break;
       }
-      return res;
     }
 
     /* Split a line on ; && || that sit outside quotes, $( ) and backticks. */
@@ -361,6 +398,12 @@
         if (c === "#" && !depth && (i === 0 || /\s/.test(line[i - 1]))) break;
         if (!depth && (line.startsWith("&&", i) || line.startsWith("||", i))) { parts.push({ op, text: cur }); op = line.slice(i, i + 2); cur = ""; i += 2; continue; }
         if (!depth && c === ";") { parts.push({ op, text: cur }); op = ";"; cur = ""; i++; continue; }
+        // A lone & (not &&, &>, >&, 2>&1) ends a command and runs it in the background.
+        if (!depth && c === "&" && line[i + 1] !== ">" && line[i - 1] !== ">") {
+          if (/^\s*;/.test(line.slice(i + 1))) throw new Error("syntax error near unexpected token `;'");
+          if (!cur.trim()) throw new Error("syntax error near unexpected token `&'");
+          parts.push({ op, text: cur, bg: true }); op = ";"; cur = ""; i++; continue;
+        }
         cur += c; i++;
       }
       if (q === "'") throw new Error("unexpected EOF while looking for matching `''");
@@ -445,6 +488,15 @@
     dollar(line, i) {
       const rest = line.slice(i + 1);
       let m;
+      if (rest.startsWith("((")) { // $(( arithmetic ))
+        const j = line.indexOf("))", i + 3);
+        if (j > 0) {
+          const expr = line.slice(i + 3, j).replace(/\$?\b([A-Za-z_]\w*)\b/g, (m, v) => String(parseInt(this.env[v], 10) || 0));
+          let value = "0";
+          if (/^[\d\s+\-*/%()]*$/.test(expr)) { try { value = String(Math.trunc(Function(`"use strict"; return (${expr || 0});`)())); } catch { value = "0"; } }
+          return { value, end: j + 2 };
+        }
+      }
       if (rest.startsWith("(")) {
         let depth = 0, j = i + 1;
         for (; j < line.length; j++) {
@@ -458,7 +510,8 @@
       if ((m = rest.match(/^\{(\w+)\}/))) return { value: this.env[m[1]] ?? "", end: i + 1 + m[0].length };
       if ((m = rest.match(/^\w+/))) return { value: this.env[m[0]] ?? "", end: i + 1 + m[0].length };
       if (rest[0] === "?") return { value: String(this.lastStatus), end: i + 2 };
-      if (rest[0] === "$") return { value: "4242", end: i + 2 };
+      if (rest[0] === "$") return { value: String(this.shellPid ? this.shellPid() : 4242), end: i + 2 };
+      if (rest[0] === "!") return { value: this.lastBgPid ? String(this.lastBgPid) : "", end: i + 2 };
       return { value: "$", end: i + 1 };
     }
 
@@ -552,7 +605,7 @@
           try { if (!f.append) this.vfs.write(f.abs, ""); else if (!this.vfs.get(f.abs)) this.vfs.write(f.abs, ""); }
           catch (e) { res.out.push({ text: `bash: ${f.target}: ${e.message}`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" }; }
         }
-        const r = this.exec(words, stdin, res, { tty: !this.batch && s === stages.length - 1 && fd1 === STD });
+        const r = this.exec(words, stdin, res, { tty: !this.batch && s === stages.length - 1 && fd1 === STD, errTty: fd2 === TERM, outFile: fd1.kind === "file" ? fd1.abs : null });
         let out = "", err = "";
         const send = (dest, text, isErr) => {
           if (!text) return;
