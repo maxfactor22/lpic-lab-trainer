@@ -134,7 +134,7 @@
       this.lastStatus = 0;
 
       // Base system tree.
-      ["/etc", "/usr/bin", "/usr/sbin", "/usr/share", "/var/log", "/tmp", "/dev", "/proc", "/boot", "/opt", "/srv", "/root"]
+      ["/etc", "/etc/ssh", "/etc/default", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/local/bin", "/usr/share/doc", "/usr/share/man/man1", "/var/log", "/var/lib", "/var/cache", "/var/spool", "/var/tmp", "/tmp", "/dev", "/proc", "/sys", "/run", "/boot", "/opt", "/srv", "/root", "/media", "/mnt", "/home", "/lib", "/bin", "/sbin"]
         .forEach((d) => this.vfs.mkdirp(d));
       this.vfs.write("/etc/hostname", this.host + "\n");
       this.vfs.write("/dev/null", "");
@@ -150,10 +150,27 @@
       this.vfs.write(this.home + "/.bash_logout", "# ~/.bash_logout: executed by bash(1) when login shell exits.\n");
       this.vfs.write(this.home + "/.bash_history", "");
 
+      // A few system files so find, locate and the FHS lesson have something real to look at.
+      const sys = {
+        "/etc/ssh/sshd_config": "# sshd configuration\nPort 22\nPermitRootLogin no\n", "/etc/default/grub": "GRUB_DEFAULT=0\nGRUB_TIMEOUT=10\n",
+        "/etc/crontab": "# /etc/crontab: system-wide crontab\n", "/etc/updatedb.conf": "PRUNE_BIND_MOUNTS=\"yes\"\nPRUNEPATHS=\"/tmp /var/spool /media /var/lib/os-prober /var/lib/ceph /home/.ecryptfs /var/lib/schroot\"\nPRUNEFS=\"NFS afs autofs binfmt_misc ceph cgroup cifs coda configfs cramfs debugfs devpts devtmpfs ecryptfs fuse proc sysfs tmpfs usbfs\"\n",
+        "/var/log/syslog": "Nov  9 08:00:01 linux-mint CRON[812]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)\n",
+        "/var/log/auth.log": "Nov  9 08:02:11 linux-mint sudo:      max : TTY=pts/0 ; PWD=/home/max ; USER=root ; COMMAND=/usr/bin/apt update\n",
+        "/var/log/dpkg.log": "2026-11-09 07:55:12 status installed tree:amd64 2.1.1-2\n", "/boot/vmlinuz-6.8.0-44-generic": "", "/boot/initrd.img-6.8.0-44-generic": "",
+        "/usr/share/doc/grep/README": "GNU grep\n", "/usr/share/man/man1/grep.1.gz": "", "/usr/share/man/man1/find.1.gz": "", "/usr/local/bin/backup-check": "#!/bin/bash\necho ok\n",
+        "/opt/vendor-agent/agent.conf": "interval=60\n", "/srv/www/index.html": "<h1>web01</h1>\n", "/var/spool/cron/.keep": "", "/media/.keep": "", "/mnt/.keep": "",
+      };
+      for (const [p, c] of Object.entries(sys)) { this.vfs.mkdirp(p.replace(/\/[^/]*$/, "")); if (!this.vfs.get(p)) this.vfs.write(p, c); }
+
+      // Workspace files. A value can be a string, null (a directory), or
+      // { content, ageDays } to make the file look older for find -mtime.
       for (const [p, content] of Object.entries(opts.files || {})) {
         const abs = this.vfs.resolve(this.expandTilde(p), this.home);
-        if (p.endsWith("/") || content === null) this.vfs.mkdirp(abs);
-        else { this.vfs.mkdirp(abs.replace(/\/[^/]*$/, "") || "/"); this.vfs.write(abs, content); }
+        if (p.endsWith("/") || content === null) { this.vfs.mkdirp(abs); continue; }
+        const text = typeof content === "object" ? content.content || "" : content;
+        this.vfs.mkdirp(abs.replace(/\/[^/]*$/, "") || "/");
+        this.vfs.write(abs, text);
+        if (typeof content === "object" && content.ageDays) this.vfs.get(abs).mtime = Date.now() - content.ageDays * 864e5;
       }
       this.cwd = this.vfs.resolve(this.expandTilde(opts.cwd || "~"), this.home);
       this.vfs.mkdirp(this.cwd);
@@ -208,28 +225,53 @@
         return `< ${id}`;
       });
 
-      let tokens;
-      try { tokens = this.tokenize(line); }
+      // Split into ; && || lists first, and expand each part only when it runs, so
+      // "cmd; echo $?" and "x=1; echo $x" see the results of the earlier commands.
+      let lists;
+      try { lists = this.splitLists(line); }
       catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return res; }
 
-      // Split into && / || / ; lists of pipelines.
-      const lists = [];
-      let cur = [], op = null;
-      for (const t of tokens) {
-        if (t.op === ";" || t.op === "&&" || t.op === "||") { lists.push({ op, tokens: cur }); op = t.op; cur = []; }
-        else cur.push(t);
-      }
-      lists.push({ op, tokens: cur });
-
       for (const item of lists) {
-        if (!item.tokens.length) continue;
+        if (!item.text.trim()) continue;
         if (item.op === "&&" && this.lastStatus !== 0) continue;
         if (item.op === "||" && this.lastStatus === 0) continue;
-        const r = this.runPipeline(item.tokens, res);
+        let tokens;
+        try { tokens = this.tokenize(item.text); }
+        catch (e) { res.out.push({ text: "bash: " + e.message, cls: "terminal-error" }); this.lastStatus = 2; return res; }
+        if (!tokens.length) continue;
+        const r = this.runPipeline(tokens, res);
         if (r.stdout) res.out.push(...r.stdout.replace(/\n$/, "").split("\n").map((text) => ({ text })));
         if (res.pager || res.clear || res.exit) break;
       }
       return res;
+    }
+
+    /* Split a line on ; && || that sit outside quotes, $( ) and backticks. */
+    splitLists(line) {
+      const parts = [];
+      let cur = "", op = null, i = 0, depth = 0, q = null;
+      while (i < line.length) {
+        const c = line[i];
+        if (q) {
+          cur += c;
+          if (c === "\\" && q === '"' && i + 1 < line.length) { cur += line[++i]; }
+          else if (c === q) q = null;
+          i++; continue;
+        }
+        if (c === "\\" && i + 1 < line.length) { cur += c + line[i + 1]; i += 2; continue; }
+        if (c === "'" || c === '"' || c === "`") { q = c; cur += c; i++; continue; }
+        if (c === "$" && line[i + 1] === "(") { depth++; cur += "$("; i += 2; continue; }
+        if (c === "(" && depth) { depth++; cur += c; i++; continue; }
+        if (c === ")" && depth) { depth--; cur += c; i++; continue; }
+        if (c === "#" && !depth && (i === 0 || /\s/.test(line[i - 1]))) break;
+        if (!depth && (line.startsWith("&&", i) || line.startsWith("||", i))) { parts.push({ op, text: cur }); op = line.slice(i, i + 2); cur = ""; i += 2; continue; }
+        if (!depth && c === ";") { parts.push({ op, text: cur }); op = ";"; cur = ""; i++; continue; }
+        cur += c; i++;
+      }
+      if (q === "'") throw new Error("unexpected EOF while looking for matching `''");
+      if (q === '"') throw new Error("unexpected EOF while looking for matching `\"'");
+      parts.push({ op, text: cur });
+      return parts;
     }
 
     expandHistory(line) {
@@ -295,7 +337,7 @@
           i++; continue;
         }
         if (c === "\\") { word.word += line[i + 1] || ""; word.quoted = true; i += 2; continue; }
-        if (c === "$") { const r = this.dollar(line, i); word.word += r.value; i = r.end; continue; }
+        if (c === "$") { const r = this.dollar(line, i); word.word += r.value.replace(/\s*\n\s*/g, " "); i = r.end; continue; } // unquoted: newlines split words
         if (c === "~" && word.word === "" && (i + 1 >= line.length || /[\/\s]/.test(line[i + 1]))) { word.word += this.home; i++; continue; }
         if (c === "*" || c === "?" || c === "[") word.glob = true;
         if (c === "{") word.brace = true;
@@ -349,7 +391,9 @@
           const dirAbs = this.vfs.resolve(base || ".", this.cwd);
           const dir = this.vfs.get(dirAbs);
           if (!dir || dir.type !== "dir") continue;
-          const re = new RegExp("^" + part.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+          let re;
+          try { re = new RegExp("^" + part.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$"); }
+          catch { continue; } // not a valid pattern (a lone "[" for example), so it stays a plain word
           Object.keys(dir.children).sort().forEach((name) => {
             if (name.startsWith(".") && !part.startsWith(".")) return;
             if (re.test(name)) next.push(base + (base && !base.endsWith("/") ? "/" : "") + name);
@@ -757,18 +801,25 @@
     sha512sum(args, stdin) { return hashCmd.call(this, "sha512", args, stdin); },
 
     wc(args, stdin) {
+      // GNU wc pads every number to the width of the total byte count of all inputs
+      // (7 for standard input), except that one number for one file isn't padded.
       const o = opts(args);
       const count = (txt) => ({ l: (txt.match(/\n/g) || []).length, w: (txt.match(/\S+/g) || []).length, m: [...txt].length, c: new TextEncoder().encode(txt).length });
       const which = ["l", "w", "m", "c"].filter((f) => o.flags.has(f));
       const show = which.length ? which : ["l", "w", "c"];
-      const line = (r, name) => show.map((f) => (show.length > 1 ? pad(r[f], 2, " ") : r[f])).join(" ") + (name ? " " + name : "");
-      if (!o.rest.length) return { stdout: line(count(stdin)) + "\n" };
-      const out = [], err = [];
+      const fmt = (r, name, width) => show.map((f) => String(r[f]).padStart(width)).join(" ") + (name ? " " + name : "");
+      if (!o.rest.length) { const r = count(stdin); return { stdout: fmt(r, "", show.length === 1 ? 1 : 7) + "\n" }; }
+      const rows = [], err = [];
       for (const p of o.rest) {
         const n = this.vfs.get(this.abs(p));
-        if (!n || n.type !== "file") { err.push(`wc: ${p}: No such file or directory`); continue; }
-        out.push(line(count(n.content), p));
+        if (!n) { err.push(`wc: ${p}: No such file or directory`); continue; }
+        if (n.type !== "file") { err.push(`wc: ${p}: Is a directory`); rows.push({ r: { l: 0, w: 0, m: 0, c: 0 }, p }); continue; }
+        rows.push({ r: count(n.content), p });
       }
+      const total = rows.reduce((t, x) => ({ l: t.l + x.r.l, w: t.w + x.r.w, m: t.m + x.r.m, c: t.c + x.r.c }), { l: 0, w: 0, m: 0, c: 0 });
+      const width = show.length === 1 && rows.length === 1 ? 1 : Math.max(1, String(total.c).length);
+      const out = rows.map((x) => fmt(x.r, x.p, width));
+      if (rows.length > 1) out.push(fmt(total, "total", width));
       return { stdout: out.length ? out.join("\n") + "\n" : "", stderr: err.join("\n"), status: err.length ? 1 : 0 };
     },
 

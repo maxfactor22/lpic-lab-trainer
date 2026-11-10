@@ -378,6 +378,14 @@
   function bindTerminalLesson(lesson) {
     const ws = lesson.workspace || {};
     const shell = new LPIC.Shell({ ...ws, canned: lesson.canned, unsupported: lesson.unsupported });
+    // locate's database is a snapshot taken now; lateFiles appear after it, like files created
+    // since the last nightly updatedb run.
+    if (LPIC.locateSnapshot) shell.locateDb = LPIC.locateSnapshot(shell);
+    for (const [p, c] of Object.entries(ws.lateFiles || {})) {
+      const abs = shell.abs(p);
+      shell.vfs.mkdirp(abs.replace(/\/[^/]*$/, ""));
+      shell.vfs.write(abs, c);
+    }
     current.shell = shell;
     const out = $("#terminal-output"), input = $("#terminal-input");
     let recall = null;
