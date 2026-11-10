@@ -543,6 +543,10 @@
         if (check.not && new RegExp(check.not, "im").test(node.content)) return false;
         return !check.re || new RegExp(check.re, "im").test(node.content);
       }
+      case "dir": {
+        const node = shell.vfs.get(shell.abs(check.path));
+        return check.exists === false ? !node : !!node && node.type === "dir";
+      }
       case "history": return (check.includes || []).every((h) => shell.history.some((x) => new RegExp(h).test(norm(x))));
       case "event": return (res?.events || []).some((e) => e.type === check.event && Object.entries(check.match || {}).every(([k, re]) => new RegExp(re, "i").test(String(e[k] ?? ""))));
       case "all": return check.checks.every((c) => passes(c, ctx));

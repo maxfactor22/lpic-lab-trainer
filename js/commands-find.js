@@ -107,7 +107,7 @@
   C.fgrep = function (args, stdin) { return grep.call(this, args, stdin, "F"); };
 
   /* ------------------------------------------------------------- find */
-  const globRe = (g, i) => new RegExp("^" + g.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$", i ? "i" : "");
+  const globRe = (g, i) => new RegExp("^" + g.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[(!|\\\^)/g, "[^") + "$", i ? "i" : "");
   const sizeOf = (n) => (n.type === "dir" ? 4096 : new TextEncoder().encode(n.content || "").length);
   C.find = function (args, stdin, res) {
     const starts = [];

@@ -129,6 +129,8 @@
       this.canned = { ...DEFAULT_CANNED, ...(opts.canned || {}) };
       this.docs = opts.docs || LPIC.docs || {};
       this.unsupported = opts.unsupported || null;
+      // batch: behave like "bash -c" (no history expansion, output not a terminal). Used by tools/tests.
+      this.batch = !!opts.batch;
       this.hashed = new Set();
       this.history = [...(opts.history || [])];
       this.lastStatus = 0;
@@ -170,7 +172,9 @@
         const text = typeof content === "object" ? content.content || "" : content;
         this.vfs.mkdirp(abs.replace(/\/[^/]*$/, "") || "/");
         this.vfs.write(abs, text);
-        if (typeof content === "object" && content.ageDays) this.vfs.get(abs).mtime = Date.now() - content.ageDays * 864e5;
+        // Lab files look as if the setup ran an hour ago, so touch visibly changes the time.
+        const t = Date.now() - (typeof content === "object" && content.ageDays ? content.ageDays * 864e5 : 3600e3);
+        Object.assign(this.vfs.get(abs), { mtime: t, atime: t, ctime: t });
       }
       this.cwd = this.vfs.resolve(this.expandTilde(opts.cwd || "~"), this.home);
       this.vfs.mkdirp(this.cwd);
@@ -190,7 +194,7 @@
       if (!line.trim()) return res;
 
       // History expansion (outside single quotes).
-      const hx = this.expandHistory(line);
+      const hx = this.batch ? { line } : this.expandHistory(line);
       if (hx.error) { res.out.push({ text: hx.error, cls: "terminal-error" }); return res; }
       if (hx.changed) { line = hx.line; res.out.push({ text: line, cls: "terminal-muted" }); res.events.push({ type: "history-expand", from: raw.trim(), to: line.trim() }); }
       res.expanded = line.trim();
@@ -290,7 +294,7 @@
             i += m[0].length;
           } else if ((m = rest.match(/^[A-Za-z][\w.-]*/))) {
             cmd = [...this.history].reverse().find((h) => h.startsWith(m[0]));
-            if (cmd === undefined) return { error: `bash: !${m[0]}: event not found` };
+            if (cmd === undefined) return { error: `bash: !${(rest.match(/^\S+/) || [m[0]])[0]}: event not found` };
             i += m[0].length;
           } else { out += c; continue; }
           if (cmd === undefined || cmd === null) return { error: "bash: !!: event not found" };
@@ -392,7 +396,7 @@
           const dir = this.vfs.get(dirAbs);
           if (!dir || dir.type !== "dir") continue;
           let re;
-          try { re = new RegExp("^" + part.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$"); }
+          try { re = new RegExp("^" + part.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[(!|\\\^)/g, "[^") + "$"); } // [!x] and [^x] both negate
           catch { continue; } // not a valid pattern (a lone "[" for example), so it stays a plain word
           Object.keys(dir.children).sort().forEach((name) => {
             if (name.startsWith(".") && !part.startsWith(".")) return;
@@ -457,7 +461,7 @@
           try { if (!f.append) this.vfs.write(f.abs, ""); else if (!this.vfs.get(f.abs)) this.vfs.write(f.abs, ""); }
           catch (e) { res.out.push({ text: `bash: ${f.target}: ${e.message}`, cls: "terminal-error" }); this.lastStatus = 1; return { stdout: "" }; }
         }
-        const r = this.exec(words, stdin, res, { tty: s === stages.length - 1 && fd1 === STD });
+        const r = this.exec(words, stdin, res, { tty: !this.batch && s === stages.length - 1 && fd1 === STD });
         let out = "", err = "";
         const send = (dest, text, isErr) => {
           if (!text) return;
@@ -554,7 +558,7 @@
     ls(args, stdin, res, ctx = {}) {
       const o = opts(args.filter((a) => !a.startsWith("--color")));
       const all = o.flags.has("a"), almost = o.flags.has("A"), long = o.flags.has("l"), dirOnly = o.flags.has("d");
-      const one = o.flags.has("1") || ctx.tty === false, recursive = o.flags.has("R"), classify = o.flags.has("F");
+      const one = o.flags.has("1") || ctx.tty === false || this.batch, recursive = o.flags.has("R"), classify = o.flags.has("F");
       const targets = o.rest.length ? o.rest : ["."];
       const out = [], err = [];
       const fmt = (name, node) => {
