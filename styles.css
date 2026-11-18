@@ -542,14 +542,20 @@ a.lesson-link:hover { border-color: var(--line-strong); background: var(--card-2
 .terminal-error { color: var(--err); }
 
 .terminal-input-row {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
   padding: 10px 10px 10px 16px;
   border-top: 1px solid #1c2541;
   background: #0a0f1d;
 }
-.prompt { color: var(--term-prompt); font: 600 .84rem/1 var(--mono); white-space: nowrap; }
+/* The prompt shows the live cwd and can get long: let it shrink with an
+   ellipsis, and never let it squeeze the input below a usable width. */
+.prompt {
+  flex: 0 1 auto; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis;
+  color: var(--term-prompt); font: 600 .84rem/1.3 var(--mono); white-space: nowrap;
+}
 #terminal-input {
-  flex: 1; min-width: 0;
+  flex: 1 1 14ch; min-width: 14ch;
   padding: 8px 4px; border: 0; background: transparent;
   color: var(--text); caret-color: var(--term-prompt);
   font: 16px/1.2 var(--mono); /* 16px keeps iOS from zooming */
