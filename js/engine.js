@@ -638,14 +638,25 @@
     if (changed) refreshLesson();
   }
 
+  /* Saving output to a file shouldn't stop a command from counting:
+     "uname -r >> report.txt" satisfies a check for "uname -r". Strips trailing
+     output redirects (>, >>, 2>, &>, 2>&1). Callers try the line as typed too,
+     so checks that require a redirect still work. */
+  function stripRedirects(s) {
+    let prev;
+    do { prev = s; s = s.replace(/\s*(?:\d|&)?>>?\s*(?:&\d|[^\s'"<>|;&]+)\s*$/, ""); } while (s !== prev && s);
+    return s.trim();
+  }
+  const matchesCmd = (s, test) => test(s) || (stripRedirects(s) !== s && test(stripRedirects(s)));
+
   function passes(check, ctx) {
     if (!check) return false;
     const { res, shell } = ctx;
     const cmd = norm(res?.expanded || "");
     const outText = (res?.out || []).filter((o) => o.cls !== "terminal-error" && o.cls !== "terminal-muted").map((o) => o.text).join("\n");
     switch (check.type) {
-      case "command": return !!cmd && (check.accept || []).some((a) => norm(a) === cmd);
-      case "pattern": return !!cmd && new RegExp(check.re).test(cmd);
+      case "command": return !!cmd && matchesCmd(cmd, (c) => (check.accept || []).some((a) => norm(a) === c));
+      case "pattern": return !!cmd && matchesCmd(cmd, (c) => new RegExp(check.re).test(c));
       case "output": return !!res?.expanded && new RegExp(check.re, "m").test(outText) && (!check.cmd || new RegExp(check.cmd).test(cmd));
       case "file": {
         const node = shell.vfs.get(shell.abs(check.path));
@@ -658,7 +669,7 @@
         const node = shell.vfs.get(shell.abs(check.path));
         return check.exists === false ? !node : !!node && node.type === "dir";
       }
-      case "history": return (check.includes || []).every((h) => shell.history.some((x) => new RegExp(h).test(norm(x))));
+      case "history": return (check.includes || []).every((h) => shell.history.some((x) => matchesCmd(norm(x), (c) => new RegExp(h).test(c))));
       case "event": return (res?.events || []).some((e) => e.type === check.event && Object.entries(check.match || {}).every(([k, re]) => new RegExp(re, "i").test(String(e[k] ?? ""))));
       case "all": return check.checks.every((c) => passes(c, ctx));
       case "any": return check.checks.some((c) => passes(c, ctx));
